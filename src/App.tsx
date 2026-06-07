@@ -38,6 +38,7 @@ import {
   Calendar,
   Home,
   Menu as MenuIcon,
+  RotateCcw,
 } from 'lucide-react';
 import { createTheme, ThemeProvider, CssBaseline } from '@mui/material';
 import axios from 'axios';
@@ -156,6 +157,15 @@ export default function App() {
     rentMax: '',
     areaCategory: ''
   });
+
+  const [lastWorkingFilters, setLastWorkingFilters] = useState<{
+    keywordDraft: string;
+    keyword: string;
+    priceRange: [number, number];
+    areaRange: [number, number];
+    tableFiltersDraft: typeof tableFiltersDraft;
+    tableFilters: typeof tableFilters;
+  } | null>(null);
 
   const [config, setConfig] = useState<{ hasServiceKey: boolean }>({ hasServiceKey: false });
 
@@ -413,6 +423,31 @@ export default function App() {
   useEffect(() => {
     setPage(0);
   }, [filteredTransactions]);
+
+  // Save filter state whenever we have results
+  useEffect(() => {
+    if (filteredTransactions.length > 0) {
+      setLastWorkingFilters({
+        keywordDraft,
+        keyword,
+        priceRange: [priceRange[0], priceRange[1]],
+        areaRange: [areaRange[0], areaRange[1]],
+        tableFiltersDraft: { ...tableFiltersDraft },
+        tableFilters: { ...tableFilters }
+      });
+    }
+  }, [filteredTransactions.length, keyword, keywordDraft, priceRange, areaRange, tableFilters, tableFiltersDraft]);
+
+  const handleRestoreFilters = useCallback(() => {
+    if (lastWorkingFilters) {
+      setKeywordDraft(lastWorkingFilters.keywordDraft);
+      setKeyword(lastWorkingFilters.keyword);
+      setPriceRange(lastWorkingFilters.priceRange);
+      setAreaRange(lastWorkingFilters.areaRange);
+      setTableFiltersDraft(lastWorkingFilters.tableFiltersDraft);
+      setTableFilters(lastWorkingFilters.tableFilters);
+    }
+  }, [lastWorkingFilters]);
 
   const chartData = useMemo(() => {
     const grouped = filteredTransactions.reduce((acc: any, cur) => {
@@ -740,13 +775,25 @@ export default function App() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 지정한 필터 조건에 맞는 거래 내역이 없습니다. 필터를 조정해 보세요.
               </Typography>
-              <Button 
-                variant="outlined" 
-                startIcon={<Search size={18} />}
-                onClick={handleResetFilters}
-              >
-                필터 초기화
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+                {lastWorkingFilters && (
+                  <Button 
+                    variant="contained" 
+                    color="primary"
+                    startIcon={<RotateCcw size={18} />}
+                    onClick={handleRestoreFilters}
+                  >
+                    직전 상태로 되돌리기
+                  </Button>
+                )}
+                <Button 
+                  variant="outlined" 
+                  startIcon={<Search size={18} />}
+                  onClick={handleResetFilters}
+                >
+                  필터 초기화
+                </Button>
+              </Box>
             </Paper>
           )}
 
