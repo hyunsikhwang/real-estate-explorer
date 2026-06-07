@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import axios from "axios";
 import dotenv from "dotenv";
 
@@ -242,22 +243,48 @@ async function startServer() {
   });
 
   app.get("/api/regions", (req, res) => {
-    const regions = [
-      { code: "11680", name: "서울특별시 강남구" },
-      { code: "11710", name: "서울특별시 송파구" },
-      { code: "11650", name: "서울특별시 서초구" },
-      { code: "11440", name: "서울특별시 마포구" },
-      { code: "11200", name: "서울특별시 성동구" },
-      { code: "41135", name: "경기도 성남시 분당구" },
-      { code: "41117", name: "경기도 수원시 영통구" },
-      { code: "26440", name: "부산광역시 강서구" },
-    ];
-    const { q } = req.query;
-    if (q) {
-      const filtered = regions.filter(r => r.name.includes(q as string));
-      return res.json(filtered);
+    try {
+      const regionsPath = path.join(process.cwd(), "src", "regions.json");
+      const regions = JSON.parse(fs.readFileSync(regionsPath, "utf-8"));
+      
+      const { q } = req.query;
+      if (q) {
+        const queryStr = String(q).trim().toLowerCase().replace(/\s+/g, "");
+        if (queryStr) {
+          const filtered = regions.filter((r: any) => {
+            const nameClean = r.name.toLowerCase().replace(/\s+/g, "");
+            return nameClean.includes(queryStr);
+          });
+          
+          const sorted = filtered.sort((a: any, b: any) => {
+            const aName = a.name.toLowerCase();
+            const bName = b.name.toLowerCase();
+            const qOriginal = String(q).trim().toLowerCase();
+            
+            const aIndex = aName.indexOf(qOriginal);
+            const bIndex = bName.indexOf(qOriginal);
+            if (aIndex !== bIndex) {
+              if (aIndex === -1) return 1;
+              if (bIndex === -1) return -1;
+              return aIndex - bIndex;
+            }
+            
+            const aStarts = aName.startsWith(qOriginal);
+            const bStarts = bName.startsWith(qOriginal);
+            if (aStarts && !bStarts) return -1;
+            if (!aStarts && bStarts) return 1;
+            
+            return a.name.length - b.name.length;
+          });
+          
+          return res.json(sorted);
+        }
+      }
+      res.json(regions);
+    } catch (err) {
+      console.error("Error reading regions.json:", err);
+      res.json([]);
     }
-    res.json(regions);
   });
 
   if (process.env.NODE_ENV !== "production") {

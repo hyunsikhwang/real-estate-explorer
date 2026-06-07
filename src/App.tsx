@@ -186,14 +186,14 @@ export default function App() {
   useEffect(() => {
     const fetchRegions = async () => {
       try {
-        const res = await axios.get('/api/regions', { params: { q: regionInput } });
+        const res = await axios.get('/api/regions');
         setRegions(res.data);
       } catch (e) {
-        console.error(e);
+        console.error("Failed to load regions", e);
       }
     };
-    if (regionInput.length > 1 || regions.length === 0) fetchRegions();
-  }, [regionInput, regions.length]);
+    fetchRegions();
+  }, []);
 
   const handleSearch = useCallback(async () => {
     if (!selectedRegion || loading) return;
@@ -516,16 +516,52 @@ export default function App() {
 
       <Autocomplete
         options={regions}
-        getOptionLabel={(option) => option.name}
+        getOptionLabel={(option) => option ? option.name : ''}
         value={selectedRegion}
         onChange={(_, val) => setSelectedRegion(val)}
-        onInputChange={(_, val) => setRegionInput(val)}
+        onInputChange={(_, val) => setRegionInput(val || '')}
+        autoHighlight
+        filterOptions={(options, state) => {
+          const queryClean = state.inputValue.trim().toLowerCase().replace(/\s+/g, "");
+          if (!queryClean) return options;
+          
+          const matches = options.filter(option => {
+            if (!option || !option.name) return false;
+            const nameClean = option.name.toLowerCase().replace(/\s+/g, "");
+            return nameClean.includes(queryClean);
+          });
+          
+          return matches.sort((a, b) => {
+            const aName = a.name.toLowerCase();
+            const bName = b.name.toLowerCase();
+            const queryOriginal = state.inputValue.trim().toLowerCase();
+            
+            // 1. Exact match index first
+            const aIndex = aName.indexOf(queryOriginal);
+            const bIndex = bName.indexOf(queryOriginal);
+            if (aIndex !== bIndex) {
+              if (aIndex === -1) return 1;
+              if (bIndex === -1) return -1;
+              return aIndex - bIndex;
+            }
+            
+            // 2. Starts with query
+            const aStarts = aName.startsWith(queryOriginal);
+            const bStarts = bName.startsWith(queryOriginal);
+            if (aStarts && !bStarts) return -1;
+            if (!aStarts && bStarts) return 1;
+            
+            // 3. Shorter length option first
+            return a.name.length - b.name.length;
+          });
+        }}
         renderInput={(params) => (
           <TextField
             {...params}
             label="지역 선택 (시군구)"
             variant="outlined"
             size="small"
+            placeholder="예시: 송파구, 분당구, 해운대구"
           />
         )}
       />
