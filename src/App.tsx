@@ -454,17 +454,19 @@ export default function App() {
       const key = `${cur.dealYear}.${String(cur.dealMonth).padStart(2, '0')}`;
       if (!acc[key]) acc[key] = { 
         name: key, 
-        totalDeposit: 0, 
-        totalMonthlyRent: 0, 
-        totalSalePrice: 0,
+        prices: [] as number[],
+        deposits: [] as number[],
+        rents: [] as number[],
+        items: [] as any[],
         count: 0 
       };
       
       if (tradeType === TradeType.SALE) {
-        acc[key].totalSalePrice += cur.price;
+        acc[key].prices.push(cur.price);
       } else {
-        acc[key].totalDeposit += cur.price;
-        acc[key].totalMonthlyRent += cur.monthlyRent;
+        acc[key].deposits.push(cur.price);
+        acc[key].rents.push(cur.monthlyRent);
+        acc[key].items.push(cur);
       }
       
       acc[key].count += 1;
@@ -472,25 +474,226 @@ export default function App() {
     }, {});
 
     return Object.values(grouped).map((v: any) => {
-      const avgDeposit = v.totalDeposit ? Math.round(v.totalDeposit / v.count) : 0;
-      const avgMonthlyRent = v.totalMonthlyRent ? Math.round(v.totalMonthlyRent / v.count) : 0;
-      
+      // For Sale
+      let avgPrice = 0;
+      let maxPrice = 0;
+      let minPrice = 0;
+      if (v.prices.length > 0) {
+        const sum = v.prices.reduce((s: number, p: number) => s + p, 0);
+        avgPrice = Math.round(sum / v.prices.length);
+        maxPrice = Math.max(...v.prices);
+        minPrice = Math.min(...v.prices);
+      }
+
+      // For Rent
+      let avgDeposit = 0;
+      let maxDeposit: number | null = null;
+      let minDeposit: number | null = null;
+      if (v.deposits.length > 0) {
+        const sum = v.deposits.reduce((s: number, d: number) => s + d, 0);
+        avgDeposit = Math.round(sum / v.deposits.length);
+      }
+
+      // Max/Min Deposit: Filter only for items with monthlyRent === 0 (전세)
+      if (v.items && v.items.length > 0) {
+        const jeonseDeposits = v.items.filter((item: any) => item.monthlyRent === 0).map((item: any) => item.price);
+        if (jeonseDeposits.length > 0) {
+          maxDeposit = Math.max(...jeonseDeposits);
+          minDeposit = Math.min(...jeonseDeposits);
+        }
+      }
+
+      let avgMonthlyRent = 0;
+      let maxMonthlyRent: number | null = null;
+      let minMonthlyRent: number | null = null;
+      if (v.rents.length > 0) {
+        const sum = v.rents.reduce((s: number, r: number) => s + r, 0);
+        avgMonthlyRent = Math.round(sum / v.rents.length);
+      }
+
+      // Max/Min Rent: Filter only for items with monthlyRent > 0 (월세)
+      if (v.items && v.items.length > 0) {
+        const activeRents = v.items.filter((item: any) => item.monthlyRent > 0).map((item: any) => item.monthlyRent);
+        if (activeRents.length > 0) {
+          maxMonthlyRent = Math.max(...activeRents);
+          minMonthlyRent = Math.min(...activeRents);
+        }
+      }
+
+      // Equivalents
       // Conversion logic (Annual rate 5.5% = 0.055)
       // Deposit Equivalent = Current Deposit + (Monthly Rent * 12 / 0.055)
       const avgDepositEquiv = Math.round(avgDeposit + (avgMonthlyRent * 12 / 0.055));
       // Rent Equivalent = Current Monthly Rent + (Deposit * 0.055 / 12)
       const avgRentEquiv = Math.round(avgMonthlyRent + (avgDeposit * 0.055 / 12));
 
+      let maxDepositEquiv = 0;
+      let minDepositEquiv = 0;
+      let maxRentEquiv = 0;
+      let minRentEquiv = 0;
+
+      if (tradeType !== TradeType.SALE && v.deposits.length > 0) {
+        const equivs = v.deposits.map((dep: number, idx: number) => {
+          const rnt = v.rents[idx];
+          const depEq = Math.round(dep + (rnt * 12 / 0.055));
+          const rntEq = Math.round(rnt + (dep * 0.055 / 12));
+          return { depEq, rntEq };
+        });
+        const depEqs = equivs.map((e: any) => e.depEq);
+        const rntEqs = equivs.map((e: any) => e.rntEq);
+        maxDepositEquiv = Math.max(...depEqs);
+        minDepositEquiv = Math.min(...depEqs);
+        maxRentEquiv = Math.max(...rntEqs);
+        minRentEquiv = Math.min(...rntEqs);
+      }
+
       return {
         ...v,
-        avgPrice: v.totalSalePrice ? Math.round(v.totalSalePrice / v.count) : 0,
+        avgPrice,
+        maxPrice,
+        minPrice,
         avgDeposit,
+        maxDeposit,
+        minDeposit,
         avgMonthlyRent,
+        maxMonthlyRent,
+        minMonthlyRent,
         avgDepositEquiv,
+        maxDepositEquiv,
+        minDepositEquiv,
         avgRentEquiv,
+        maxRentEquiv,
+        minRentEquiv,
         tradeCount: v.count
       };
     }).sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }, [filteredTransactions, tradeType]);
+
+  const monthlyExtremes = useMemo(() => {
+    if (tradeType === TradeType.SALE) {
+      const extremes: Record<string, { 
+        maxPrice: number; 
+        minPrice: number;
+        maxPriceIds: Set<string>;
+        minPriceIds: Set<string>;
+        count: number;
+      }> = {};
+
+      filteredTransactions.forEach((row) => {
+        const monthKey = `${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}`;
+        const val = row.price;
+
+        if (!extremes[monthKey]) {
+          extremes[monthKey] = {
+            maxPrice: val,
+            minPrice: val,
+            maxPriceIds: new Set([row.id]),
+            minPriceIds: new Set([row.id]),
+            count: 1
+          };
+        } else {
+          extremes[monthKey].count += 1;
+          
+          if (val > extremes[monthKey].maxPrice) {
+            extremes[monthKey].maxPrice = val;
+            extremes[monthKey].maxPriceIds = new Set([row.id]);
+          } else if (val === extremes[monthKey].maxPrice) {
+            extremes[monthKey].maxPriceIds.add(row.id);
+          }
+
+          if (val < extremes[monthKey].minPrice) {
+            extremes[monthKey].minPrice = val;
+            extremes[monthKey].minPriceIds = new Set([row.id]);
+          } else if (val === extremes[monthKey].minPrice) {
+            extremes[monthKey].minPriceIds.add(row.id);
+          }
+        }
+      });
+      return { sale: extremes, rent: {} as Record<string, any> };
+    } else {
+      const extremes: Record<string, {
+        maxDeposit?: number;
+        minDeposit?: number;
+        maxDepositIds: Set<string>;
+        minDepositIds: Set<string>;
+        maxRent?: number;
+        minRent?: number;
+        maxRentIds: Set<string>;
+        minRentIds: Set<string>;
+        count: number;
+      }> = {};
+
+      filteredTransactions.forEach((row) => {
+        const monthKey = `${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}`;
+        const dep = row.price; // 보증금
+        const rnt = row.monthlyRent; // 월세
+
+        if (!extremes[monthKey]) {
+          extremes[monthKey] = {
+            maxDepositIds: new Set<string>(),
+            minDepositIds: new Set<string>(),
+            maxRentIds: new Set<string>(),
+            minRentIds: new Set<string>(),
+            count: 1
+          };
+        } else {
+          extremes[monthKey].count += 1;
+        }
+
+        // Deposit Max/Min (Only if monthlyRent === 0)
+        if (rnt === 0) {
+          if (extremes[monthKey].maxDeposit === undefined) {
+            extremes[monthKey].maxDeposit = dep;
+            extremes[monthKey].minDeposit = dep;
+            extremes[monthKey].maxDepositIds = new Set([row.id]);
+            extremes[monthKey].minDepositIds = new Set([row.id]);
+          } else {
+            // Compare Max
+            if (dep > extremes[monthKey].maxDeposit) {
+              extremes[monthKey].maxDeposit = dep;
+              extremes[monthKey].maxDepositIds = new Set([row.id]);
+            } else if (dep === extremes[monthKey].maxDeposit) {
+              extremes[monthKey].maxDepositIds.add(row.id);
+            }
+
+            // Compare Min
+            if (dep < extremes[monthKey].minDeposit) {
+              extremes[monthKey].minDeposit = dep;
+              extremes[monthKey].minDepositIds = new Set([row.id]);
+            } else if (dep === extremes[monthKey].minDeposit) {
+              extremes[monthKey].minDepositIds.add(row.id);
+            }
+          }
+        }
+
+        // Rent Max/Min (Only if monthlyRent > 0)
+        if (rnt > 0) {
+          if (extremes[monthKey].maxRent === undefined) {
+            extremes[monthKey].maxRent = rnt;
+            extremes[monthKey].minRent = rnt;
+            extremes[monthKey].maxRentIds = new Set([row.id]);
+            extremes[monthKey].minRentIds = new Set([row.id]);
+          } else {
+            // Compare Max
+            if (rnt > extremes[monthKey].maxRent) {
+              extremes[monthKey].maxRent = rnt;
+              extremes[monthKey].maxRentIds = new Set([row.id]);
+            } else if (rnt === extremes[monthKey].maxRent) {
+              extremes[monthKey].maxRentIds.add(row.id);
+            }
+
+            // Compare Min
+            if (rnt < extremes[monthKey].minRent) {
+              extremes[monthKey].minRent = rnt;
+              extremes[monthKey].minRentIds = new Set([row.id]);
+            } else if (rnt === extremes[monthKey].minRent) {
+              extremes[monthKey].minRentIds.add(row.id);
+            }
+          }
+        }
+      });
+      return { sale: {} as Record<string, any>, rent: extremes };
+    }
   }, [filteredTransactions, tradeType]);
 
   const renderSidebar = (
@@ -751,7 +954,7 @@ export default function App() {
           <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
             <Box>
               <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: "-0.04em" }}>
-                Real Estate Explorer <span style={{ color: theme.palette.primary.main }}>{selectedRegion?.name}</span>
+                Insight Estate Pro <span style={{ color: theme.palette.primary.main }}>{selectedRegion?.name}</span>
               </Typography>
               {lastSearchPeriod && (
                 <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
@@ -920,6 +1123,19 @@ export default function App() {
                             boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                             fontSize: '12px'
                           }}
+                          formatter={(value: any, name: any) => {
+                            if (name === "거래건수" || name === "거래 건수") return [`${value}건`, name];
+                            const num = Number(value);
+                            if (name.includes("월세")) {
+                              return [`${num}만원`, name];
+                            }
+                            if (num >= 10000) {
+                              const eok = Math.floor(num / 10000);
+                              const remainder = num % 10000;
+                              return [remainder > 0 ? `${eok}억 ${remainder.toLocaleString()}만` : `${eok}억`, name];
+                            }
+                            return [`${num.toLocaleString()}만`, name];
+                          }}
                         />
                         <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
                         
@@ -928,24 +1144,58 @@ export default function App() {
                           yAxisId="count" 
                           dataKey="tradeCount" 
                           name="거래건수" 
-                          fill="#e2e8f0" 
+                          fill="#f1f5f9" 
                           radius={[4, 4, 0, 0]} 
                           barSize={20}
                         />
 
                         {tradeType === TradeType.SALE ? (
-                          <Line 
-                            yAxisId="left" 
-                            type="monotone" 
-                            dataKey="avgPrice" 
-                            name="평균 매매가" 
-                            stroke={theme.palette.primary.main} 
-                            strokeWidth={3} 
-                            dot={{ r: 4 }} 
-                            activeDot={{ r: 6 }} 
-                          />
+                          <>
+                            <Line 
+                              yAxisId="left" 
+                              type="monotone" 
+                              dataKey="maxPrice" 
+                              name="최대 매매가" 
+                              stroke="#f43f5e" 
+                              strokeWidth={1.5} 
+                              strokeDasharray="4 4"
+                              dot={{ r: 3 }} 
+                              activeDot={{ r: 5 }} 
+                            />
+                            <Line 
+                              yAxisId="left" 
+                              type="monotone" 
+                              dataKey="avgPrice" 
+                              name="평균 매매가" 
+                              stroke={theme.palette.primary.main} 
+                              strokeWidth={3} 
+                              dot={{ r: 5 }} 
+                              activeDot={{ r: 7 }} 
+                            />
+                            <Line 
+                              yAxisId="left" 
+                              type="monotone" 
+                              dataKey="minPrice" 
+                              name="최소 매매가" 
+                              stroke="#10b981" 
+                              strokeWidth={1.5} 
+                              strokeDasharray="4 4"
+                              dot={{ r: 3 }} 
+                              activeDot={{ r: 5 }} 
+                            />
+                          </>
                         ) : chartMode === 'individual' ? (
                           <>
+                            <Line 
+                              yAxisId="left" 
+                              type="monotone" 
+                              dataKey="maxDeposit" 
+                              name="최대 보증금" 
+                              stroke="#f43f5e" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
+                            />
                             <Line 
                               yAxisId="left" 
                               type="monotone" 
@@ -957,6 +1207,27 @@ export default function App() {
                               activeDot={{ r: 6 }} 
                             />
                             <Line 
+                              yAxisId="left" 
+                              type="monotone" 
+                              dataKey="minDeposit" 
+                              name="최소 보증금" 
+                              stroke="#10b981" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
+                            />
+
+                            <Line 
+                              yAxisId="rent" 
+                              type="monotone" 
+                              dataKey="maxMonthlyRent" 
+                              name="최대 월세" 
+                              stroke="#f59e0b" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
+                            />
+                            <Line 
                               yAxisId="rent" 
                               type="monotone" 
                               dataKey="avgMonthlyRent" 
@@ -966,15 +1237,66 @@ export default function App() {
                               dot={{ r: 4 }} 
                               activeDot={{ r: 6 }} 
                             />
+                            <Line 
+                              yAxisId="rent" 
+                              type="monotone" 
+                              dataKey="minMonthlyRent" 
+                              name="최소 월세" 
+                              stroke="#34d399" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
+                            />
                           </>
                         ) : (
                           <>
                             <Line 
                               yAxisId="left" 
                               type="monotone" 
+                              dataKey="maxDepositEquiv" 
+                              name="최대 전세 환산가" 
+                              stroke="#c084fc" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
+                            />
+                            <Line 
+                              yAxisId="left" 
+                              type="monotone" 
                               dataKey="avgDepositEquiv" 
-                              name="전세 환산가" 
+                              name="평균 전세 환산가" 
                               stroke="#8b5cf6" 
+                              strokeWidth={3} 
+                              dot={{ r: 4 }} 
+                              activeDot={{ r: 6 }} 
+                            />
+                            <Line 
+                              yAxisId="left" 
+                              type="monotone" 
+                              dataKey="minDepositEquiv" 
+                              name="최소 전세 환산가" 
+                              stroke="#a7f3d0" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
+                            />
+
+                            <Line 
+                              yAxisId="rent" 
+                              type="monotone" 
+                              dataKey="maxRentEquiv" 
+                              name="최대 월세 환산가" 
+                              stroke="#fb7185" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
+                            />
+                            <Line 
+                              yAxisId="rent" 
+                              type="monotone" 
+                              dataKey="avgRentEquiv" 
+                              name="평균 월세 환산가" 
+                              stroke="#f43f5e" 
                               strokeWidth={3} 
                               dot={{ r: 4 }} 
                               activeDot={{ r: 6 }} 
@@ -982,12 +1304,12 @@ export default function App() {
                             <Line 
                               yAxisId="rent" 
                               type="monotone" 
-                              dataKey="avgRentEquiv" 
-                              name="월세 환산가" 
-                              stroke="#f43f5e" 
-                              strokeWidth={3} 
-                              dot={{ r: 4 }} 
-                              activeDot={{ r: 6 }} 
+                              dataKey="minRentEquiv" 
+                              name="최소 월세 환산가" 
+                              stroke="#34d399" 
+                              strokeWidth={1.2} 
+                              strokeDasharray="4 4"
+                              dot={false}
                             />
                           </>
                         )}
@@ -1033,6 +1355,54 @@ export default function App() {
 
               <Grid size={12}>
                 <Paper sx={{ borderRadius: 4, overflow: 'hidden' }}>
+                  <Box sx={{ p: 2, px: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap', gap: 1 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#1e293b' }}>거래 세부 내역</Typography>
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {tradeType === TradeType.SALE ? (
+                        <>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(239, 68, 68, 0.08)', border: '1px solid #fca5a5' }} />
+                            <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
+                              월별 최고가
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(16, 185, 129, 0.08)', border: '1px solid #6ee7b7' }} />
+                            <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
+                              월별 최저가
+                            </Typography>
+                          </Box>
+                        </>
+                      ) : (
+                        <>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(239, 68, 68, 0.08)', border: '1px solid #fca5a5' }} />
+                            <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
+                              보증금 최고 (월세 0 기준)
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(16, 185, 129, 0.08)', border: '1px solid #6ee7b7' }} />
+                            <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
+                              보증금 최저 (월세 0 기준)
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(245, 158, 11, 0.08)', border: '1px solid #fcd34d' }} />
+                            <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
+                              월세 최고 (월세 0 제외)
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(59, 130, 246, 0.08)', border: '1px solid #93c5fd' }} />
+                            <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
+                              월세 최저 (월세 0 제외)
+                            </Typography>
+                          </Box>
+                        </>
+                      )}
+                    </Box>
+                  </Box>
                   <TableContainer>
                     <Table sx={{ minWidth: 650 }}>
                     <TableHead sx={{ backgroundColor: '#f8fafc' }}>
@@ -1221,39 +1591,190 @@ export default function App() {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {filteredTransactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((row) => (
-                        <TableRow key={row.id} hover>
-                          <TableCell sx={{ fontWeight: 800, whiteSpace: 'nowrap' }}>
-                            {`${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}.${String(row.dealDay).padStart(2, '0')}`}
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>{row.apartmentName}</TableCell>
-                          <TableCell sx={{ fontWeight: 700, color: theme.palette.primary.dark }}>
-                            {tradeType === TradeType.SALE ? (
-                              row.price.toLocaleString()
-                            ) : (
-                              `${row.price.toLocaleString()} / ${row.monthlyRent.toLocaleString()}`
+                      {filteredTransactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((row) => {
+                        const monthKey = `${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}`;
+                        
+                        let isMaxPrice = false;
+                        let isMinPrice = false;
+                        let isMaxDeposit = false;
+                        let isMinDeposit = false;
+                        let isMaxRent = false;
+                        let isMinRent = false;
+
+                        if (tradeType === TradeType.SALE) {
+                          const ext = monthlyExtremes.sale[monthKey];
+                          const isExtreme = ext && ext.count > 1 && ext.maxPrice !== ext.minPrice;
+                          isMaxPrice = isExtreme && ext.maxPriceIds.has(row.id);
+                          isMinPrice = isExtreme && ext.minPriceIds.has(row.id);
+                        } else {
+                          const ext = monthlyExtremes.rent[monthKey];
+                          if (ext && ext.count > 1) {
+                            // Deposit extremes (Only if row.monthlyRent === 0)
+                            if (row.monthlyRent === 0 && ext.maxDeposit !== undefined && ext.minDeposit !== undefined && ext.maxDeposit !== ext.minDeposit) {
+                              isMaxDeposit = ext.maxDepositIds.has(row.id);
+                              isMinDeposit = ext.minDepositIds.has(row.id);
+                            }
+                            // Rent extremes (Only if row.monthlyRent > 0)
+                            if (row.monthlyRent > 0 && ext.maxRent !== undefined && ext.minRent !== undefined) {
+                              if (ext.maxRent === ext.minRent) {
+                                isMaxRent = ext.maxRentIds.has(row.id);
+                              } else {
+                                isMaxRent = ext.maxRentIds.has(row.id);
+                                isMinRent = ext.minRentIds.has(row.id);
+                              }
+                            }
+                          }
+                        }
+
+                        let rowBg = "inherit";
+                        let textColor = "inherit";
+
+                        if (isMaxPrice || isMaxDeposit) {
+                          rowBg = "rgba(239, 68, 68, 0.04)";
+                          textColor = "#ef4444";
+                        } else if (isMinPrice || isMinDeposit) {
+                          rowBg = "rgba(16, 185, 129, 0.04)";
+                          textColor = "#10b981";
+                        } else if (isMaxRent) {
+                          rowBg = "rgba(245, 158, 11, 0.04)";
+                          textColor = "#f59e0b";
+                        } else if (isMinRent) {
+                          rowBg = "rgba(59, 130, 246, 0.04)";
+                          textColor = "#3b82f6";
+                        }
+
+                        if (textColor === "inherit") {
+                          textColor = theme.palette.primary.dark;
+                        }
+
+                        return (
+                          <TableRow key={row.id} hover sx={{ backgroundColor: rowBg }}>
+                            <TableCell sx={{ fontWeight: 800, whiteSpace: 'nowrap' }}>
+                              {`${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}.${String(row.dealDay).padStart(2, '0')}`}
+                            </TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.apartmentName}</TableCell>
+                            <TableCell sx={{ fontWeight: 700, px: 2, color: textColor }}>
+                              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                                <span>
+                                  {tradeType === TradeType.SALE ? (
+                                    row.price.toLocaleString()
+                                  ) : (
+                                    `${row.price.toLocaleString()} / ${row.monthlyRent.toLocaleString()}`
+                                  )}
+                                </span>
+                                {isMaxPrice && (
+                                  <Chip 
+                                    label="최고가" 
+                                    size="small" 
+                                    sx={{ 
+                                      height: 18, 
+                                      fontSize: "10px", 
+                                      fontWeight: 800, 
+                                      bgcolor: "#fee2e2", 
+                                      color: "#ef4444", 
+                                      border: "1px solid #fca5a5",
+                                      ".MuiChip-label": { px: 0.8 }
+                                    }} 
+                                  />
+                                )}
+                                {isMinPrice && (
+                                  <Chip 
+                                    label="최저가" 
+                                    size="small" 
+                                    sx={{ 
+                                      height: 18, 
+                                      fontSize: "10px", 
+                                      fontWeight: 800, 
+                                      bgcolor: "#d1fae5", 
+                                      color: "#10b981", 
+                                      border: "1px solid #6ee7b7",
+                                      ".MuiChip-label": { px: 0.8 }
+                                    }} 
+                                  />
+                                )}
+                                {isMaxDeposit && (
+                                  <Chip 
+                                    label="보증금 최고" 
+                                    size="small" 
+                                    sx={{ 
+                                      height: 18, 
+                                      fontSize: "10px", 
+                                      fontWeight: 800, 
+                                      bgcolor: "#fee2e2", 
+                                      color: "#ef4444", 
+                                      border: "1px solid #fca5a5",
+                                      ".MuiChip-label": { px: 0.8 }
+                                    }} 
+                                  />
+                                )}
+                                {isMinDeposit && (
+                                  <Chip 
+                                    label="보증금 최저" 
+                                    size="small" 
+                                    sx={{ 
+                                      height: 18, 
+                                      fontSize: "10px", 
+                                      fontWeight: 800, 
+                                      bgcolor: "#d1fae5", 
+                                      color: "#10b981", 
+                                      border: "1px solid #6ee7b7",
+                                      ".MuiChip-label": { px: 0.8 }
+                                    }} 
+                                  />
+                                )}
+                                {isMaxRent && (
+                                  <Chip 
+                                    label="월세 최고" 
+                                    size="small" 
+                                    sx={{ 
+                                      height: 18, 
+                                      fontSize: "10px", 
+                                      fontWeight: 800, 
+                                      bgcolor: "#fef3c7", 
+                                      color: "#d97706", 
+                                      border: "1px solid #fcd34d",
+                                      ".MuiChip-label": { px: 0.8 }
+                                    }} 
+                                  />
+                                )}
+                                {isMinRent && (
+                                  <Chip 
+                                    label="월세 최저" 
+                                    size="small" 
+                                    sx={{ 
+                                      height: 18, 
+                                      fontSize: "10px", 
+                                      fontWeight: 800, 
+                                      bgcolor: "#dbeafe", 
+                                      color: "#2563eb", 
+                                      border: "1px solid #93c5fd",
+                                      ".MuiChip-label": { px: 0.8 }
+                                    }} 
+                                  />
+                                )}
+                              </Box>
+                            </TableCell>
+                            <TableCell>{row.area}㎡ / {row.pyeong}평</TableCell>
+                            <TableCell>{row.floor}층</TableCell>
+                            {tradeType === TradeType.RENT && (
+                              <>
+                                <TableCell>
+                                  <Chip 
+                                    label={row.contractLevel || "-"} 
+                                    size="small" 
+                                    variant="outlined"
+                                    color={row.contractLevel === "갱신" ? "secondary" : "default"}
+                                  />
+                                </TableCell>
+                                <TableCell>{row.useRequestRenew || "-"}</TableCell>
+                                <TableCell>
+                                  {row.previousDeposit ? `${row.previousDeposit.toLocaleString()} / ${row.previousMonthlyRent?.toLocaleString()}` : "-"}
+                                </TableCell>
+                              </>
                             )}
-                          </TableCell>
-                          <TableCell>{row.area}㎡ / {row.pyeong}평</TableCell>
-                          <TableCell>{row.floor}층</TableCell>
-                          {tradeType === TradeType.RENT && (
-                            <>
-                              <TableCell>
-                                <Chip 
-                                  label={row.contractLevel || '-'} 
-                                  size="small" 
-                                  variant="outlined"
-                                  color={row.contractLevel === '갱신' ? 'secondary' : 'default'}
-                                />
-                              </TableCell>
-                              <TableCell>{row.useRequestRenew || '-'}</TableCell>
-                              <TableCell>
-                                {row.previousDeposit ? `${row.previousDeposit.toLocaleString()} / ${row.previousMonthlyRent?.toLocaleString()}` : '-'}
-                              </TableCell>
-                            </>
-                          )}
-                        </TableRow>
-                      ))}
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </TableContainer>
