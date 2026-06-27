@@ -31,6 +31,10 @@ import {
   TableRow,
   Slider,
   InputAdornment,
+  Select,
+  MenuItem,
+  Checkbox,
+  ListItemText,
 } from '@mui/material';
 import {
   Search,
@@ -118,6 +122,16 @@ export default function App() {
   const [keywordDraft, setKeywordDraft] = useState('');
   const [keyword, setKeyword] = useState('');
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
+  const uniqueFloors = useMemo(() => {
+    const floors = allTransactions.map(t => t.floor);
+    const unique = Array.from(new Set(floors)).sort((a, b) => a - b);
+    return unique;
+  }, [allTransactions]);
+  const uniquePyeongs = useMemo(() => {
+    const pyeongs = allTransactions.map(t => t.pyeong);
+    const unique = Array.from(new Set(pyeongs)).sort((a, b) => a - b);
+    return unique;
+  }, [allTransactions]);
   const [chartMode, setChartMode] = useState<'individual' | 'converted'>('individual');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -136,26 +150,26 @@ export default function App() {
   const [tableFiltersDraft, setTableFiltersDraft] = useState({
     contractLevel: '',
     useRequestRenew: '',
-    floor: '',
+    floor: [] as string[],
     dong: '',
     priceMin: '',
     priceMax: '',
     rentMin: '',
     rentMax: '',
-    areaCategory: ''
+    areaCategory: [] as string[]
   });
 
   // Committed Table Column Filters (applied on Enter)
   const [tableFilters, setTableFilters] = useState({
     contractLevel: '',
     useRequestRenew: '',
-    floor: '',
+    floor: [] as string[],
     dong: '',
     priceMin: '',
     priceMax: '',
     rentMin: '',
     rentMax: '',
-    areaCategory: ''
+    areaCategory: [] as string[]
   });
 
   const [lastWorkingFilters, setLastWorkingFilters] = useState<{
@@ -369,13 +383,13 @@ export default function App() {
     const initialFilters = {
       contractLevel: '',
       useRequestRenew: '',
-      floor: '',
+      floor: [] as string[],
       dong: '',
       priceMin: '',
       priceMax: '',
       rentMin: '',
       rentMax: '',
-      areaCategory: ''
+      areaCategory: [] as string[]
     };
     setTableFiltersDraft(initialFilters);
     setTableFilters(initialFilters);
@@ -391,7 +405,7 @@ export default function App() {
         // Table Column Filters
         const matchContract = tableFilters.contractLevel ? t.contractLevel === tableFilters.contractLevel : true;
         const matchRenew = tableFilters.useRequestRenew ? t.useRequestRenew === tableFilters.useRequestRenew : true;
-        const matchFloor = tableFilters.floor ? String(t.floor) === tableFilters.floor : true;
+        const matchFloor = tableFilters.floor.length > 0 ? tableFilters.floor.includes(String(t.floor)) : true;
         const matchDong = tableFilters.dong 
           ? (t.apartmentName.toLowerCase().includes(tableFilters.dong.toLowerCase()) || t.dong.toLowerCase().includes(tableFilters.dong.toLowerCase()))
           : true;
@@ -402,10 +416,9 @@ export default function App() {
         const matchTableRentMax = tableFilters.rentMax ? t.monthlyRent <= Number(tableFilters.rentMax) : true;
         
         let matchAreaCategory = true;
-        if (tableFilters.areaCategory === '10-20') matchAreaCategory = t.area < 60;
-        else if (tableFilters.areaCategory === '30') matchAreaCategory = t.area >= 60 && t.area < 85;
-        else if (tableFilters.areaCategory === '40') matchAreaCategory = t.area >= 85 && t.area < 115;
-        else if (tableFilters.areaCategory === '50+') matchAreaCategory = t.area >= 115;
+        if (tableFilters.areaCategory.length > 0) {
+          matchAreaCategory = tableFilters.areaCategory.includes(String(t.pyeong));
+        }
 
         return matchKeyword && matchPrice && matchArea && matchContract && matchRenew && matchFloor && matchDong &&
                matchTablePriceMin && matchTablePriceMax && matchTableRentMin && matchTableRentMax &&
@@ -1488,48 +1501,89 @@ export default function App() {
                         </TableCell>
                         <TableCell sx={{ fontWeight: 700, py: 1 }}>
                           면적 (㎡/평)
-                          <TextField 
-                            select 
-                            size="small" 
-                            variant="standard" 
-                            fullWidth 
-                            slotProps={{ 
-                              select: { native: true },
-                              input: { style: { fontSize: '11px' } }
-                            }}
+                          <Select
+                            multiple
+                            displayEmpty
+                            size="small"
+                            variant="standard"
+                            fullWidth
+                            sx={{ fontSize: '11px', mt: 0.5 }}
                             value={tableFiltersDraft.areaCategory}
                             onChange={(e) => {
-                              const val = e.target.value;
+                              const val = e.target.value as string[];
                               setTableFiltersDraft(prev => {
                                 const updated = { ...prev, areaCategory: val };
                                 setTableFilters(updated);
                                 return updated;
                               });
                             }}
+                            renderValue={(selected) => {
+                              if (!selected || selected.length === 0) {
+                                return <span style={{ color: '#aaa', fontSize: '11px' }}>전체 평형</span>;
+                              }
+                              return <span style={{ fontSize: '11px' }}>{selected.length}개 선택</span>;
+                            }}
+                            MenuProps={{
+                              PaperProps: {
+                                style: {
+                                  maxHeight: 300,
+                                }
+                              }
+                            } as any}
                           >
-                            <option value="">전체 평형</option>
-                            <option value="10-20">10-20평형 (~60㎡)</option>
-                            <option value="30">30평형 (60~85㎡)</option>
-                            <option value="40">40평형 (85~115㎡)</option>
-                            <option value="50+">50평형 이상 (115㎡~)</option>
-                          </TextField>
+                            {uniquePyeongs.map((py) => {
+                              const pyStr = String(py);
+                              return (
+                                <MenuItem key={pyStr} value={pyStr} sx={{ py: 0.25 }}>
+                                  <Checkbox checked={tableFiltersDraft.areaCategory.includes(pyStr)} size="small" sx={{ p: 0.5 }} />
+                                  <ListItemText primary={<span style={{ fontSize: '12px' }}>{pyStr}평</span>} />
+                                </MenuItem>
+                              );
+                            })}
+                          </Select>
                         </TableCell>
                         <TableCell sx={{ fontWeight: 700, py: 1 }}>
                           층
-                          <TextField 
-                            placeholder="층 (Enter)" 
-                            size="small" 
-                            variant="standard" 
-                            fullWidth 
-                            slotProps={{ input: { style: { fontSize: '11px' } } }}
+                          <Select
+                            multiple
+                            displayEmpty
+                            size="small"
+                            variant="standard"
+                            fullWidth
+                            sx={{ fontSize: '11px', mt: 0.5 }}
                             value={tableFiltersDraft.floor}
-                            onChange={(e) => setTableFiltersDraft(prev => ({ ...prev, floor: e.target.value }))}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                setTableFilters(tableFiltersDraft);
-                              }
+                            onChange={(e) => {
+                              const val = e.target.value as string[];
+                              setTableFiltersDraft(prev => {
+                                const updated = { ...prev, floor: val };
+                                setTableFilters(updated);
+                                return updated;
+                              });
                             }}
-                          />
+                            renderValue={(selected) => {
+                              if (!selected || selected.length === 0) {
+                                return <span style={{ color: '#aaa', fontSize: '11px' }}>전체 층</span>;
+                              }
+                              return <span style={{ fontSize: '11px' }}>{selected.length}개 선택</span>;
+                            }}
+                            MenuProps={{
+                              PaperProps: {
+                                style: {
+                                  maxHeight: 300,
+                                }
+                              }
+                            } as any}
+                          >
+                            {uniqueFloors.map((fl) => {
+                              const flStr = String(fl);
+                              return (
+                                <MenuItem key={flStr} value={flStr} sx={{ py: 0.25 }}>
+                                  <Checkbox checked={tableFiltersDraft.floor.includes(flStr)} size="small" sx={{ p: 0.5 }} />
+                                  <ListItemText primary={<span style={{ fontSize: '12px' }}>{flStr}층</span>} />
+                                </MenuItem>
+                              );
+                            })}
+                          </Select>
                         </TableCell>
                         {tradeType === TradeType.RENT && (
                           <>
