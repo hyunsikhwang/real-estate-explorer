@@ -65,6 +65,7 @@ import {
 } from 'recharts';
 import { Transaction, TradeType, Region } from './types';
 import confetti from 'canvas-confetti';
+import ApartmentMap from './components/ApartmentMap';
 
 // --- Utility Functions ---
 const parsePrice = (val: any) => {
@@ -135,6 +136,7 @@ export default function App() {
   const [chartMode, setChartMode] = useState<'individual' | 'converted'>('individual');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
 
   // Filtering States
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 500000]);
@@ -213,6 +215,21 @@ export default function App() {
     if (!selectedRegion || loading) return;
     setLoading(true);
     setAllTransactions([]); // Clear previous results
+
+    // Reset table-specific column filters automatically upon new search
+    const initialFilters = {
+      contractLevel: '',
+      useRequestRenew: '',
+      floor: [] as string[],
+      dong: '',
+      priceMin: '',
+      priceMax: '',
+      rentMin: '',
+      rentMax: '',
+      areaCategory: [] as string[]
+    };
+    setTableFiltersDraft(initialFilters);
+    setTableFilters(initialFilters);
     
     // Synchronize the search keyword with the current draft input
     setKeyword(keywordDraft);
@@ -312,6 +329,7 @@ export default function App() {
             
             const dong = item.umdNm || item.dong || item.법정동 || "";
             const floor = parseInt(item.floor || item.flr || item.층 || "0");
+            const jibun = String(item.jibun || item.지번 || item.lotNo || "").trim();
             
             const yearStr = item.dealYear || item.year || item.년 || item.deal_year || "0";
             const monthStr = item.dealMonth || item.month || item.월 || item.deal_month || "0";
@@ -339,6 +357,7 @@ export default function App() {
               dealDay,
               buildYear,
               dong,
+              jibun,
               pyeong: calcPyeong(area),
               contractLevel,
               useRequestRenew,
@@ -395,6 +414,22 @@ export default function App() {
     setTableFilters(initialFilters);
   }, []);
 
+  const clearTableFiltersOnly = useCallback(() => {
+    const initialFilters = {
+      contractLevel: '',
+      useRequestRenew: '',
+      floor: [] as string[],
+      dong: '',
+      priceMin: '',
+      priceMax: '',
+      rentMin: '',
+      rentMax: '',
+      areaCategory: [] as string[]
+    };
+    setTableFiltersDraft(initialFilters);
+    setTableFilters(initialFilters);
+  }, []);
+
   const filteredTransactions = useMemo(() => {
     return allTransactions
       .filter(t => {
@@ -436,6 +471,25 @@ export default function App() {
   useEffect(() => {
     setPage(0);
   }, [filteredTransactions]);
+
+  const selectedTransaction = useMemo(() => {
+    if (!selectedTransactionId) {
+      return filteredTransactions[0] || null;
+    }
+    return filteredTransactions.find(t => t.id === selectedTransactionId) || filteredTransactions[0] || null;
+  }, [filteredTransactions, selectedTransactionId]);
+
+  // Auto-select first transaction when list changes
+  useEffect(() => {
+    if (filteredTransactions.length > 0) {
+      const exists = filteredTransactions.some(t => t.id === selectedTransactionId);
+      if (!exists) {
+        setSelectedTransactionId(filteredTransactions[0].id);
+      }
+    } else {
+      setSelectedTransactionId(null);
+    }
+  }, [filteredTransactions, selectedTransactionId]);
 
   // Save filter state whenever we have results
   useEffect(() => {
@@ -791,7 +845,7 @@ export default function App() {
         onChange={(e) => setKeywordDraft(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
-            setKeyword(keywordDraft);
+            handleSearch();
           }
         }}
         slotProps={{
@@ -948,7 +1002,7 @@ export default function App() {
             <IconButton edge="start" onClick={() => setMobileOpen(true)}>
               <MenuIcon />
             </IconButton>
-            <Typography variant="h6" sx={{ fontWeight: 800, ml: 2 }}>Insight Estate Pro</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800, ml: 2 }}>Real Estate Explorer</Typography>
           </Toolbar>
         </AppBar>
       )}
@@ -967,7 +1021,7 @@ export default function App() {
           <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
             <Box>
               <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: "-0.04em" }}>
-                Insight Estate Pro <span style={{ color: theme.palette.primary.main }}>{selectedRegion?.name}</span>
+                Real Estate Explorer <span style={{ color: theme.palette.primary.main }}>{selectedRegion?.name}</span>
               </Typography>
               {lastSearchPeriod && (
                 <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
@@ -1369,7 +1423,33 @@ export default function App() {
               <Grid size={12}>
                 <Paper sx={{ borderRadius: 4, overflow: 'hidden' }}>
                   <Box sx={{ p: 2, px: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap', gap: 1 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#1e293b' }}>거래 세부 내역</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#1e293b' }}>거래 세부 내역</Typography>
+                      <Button
+                        id="reset-table-filters-btn"
+                        variant="outlined"
+                        size="small"
+                        startIcon={<RotateCcw size={12} />}
+                        onClick={clearTableFiltersOnly}
+                        sx={{
+                          textTransform: 'none',
+                          fontSize: '11px',
+                          py: 0.25,
+                          px: 1,
+                          borderColor: '#cbd5e1',
+                          color: '#475569',
+                          borderRadius: '6px',
+                          backgroundColor: '#ffffff',
+                          minWidth: 'auto',
+                          '&:hover': {
+                            borderColor: '#94a3b8',
+                            backgroundColor: '#f8fafc',
+                          }
+                        }}
+                      >
+                        필터 초기화
+                      </Button>
+                    </Box>
                     <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                       {tradeType === TradeType.SALE ? (
                         <>
@@ -1701,8 +1781,23 @@ export default function App() {
                           textColor = theme.palette.primary.dark;
                         }
 
+                        const isSelected = row.id === selectedTransactionId;
+                        const displayBg = isSelected ? "rgba(37, 99, 235, 0.08)" : rowBg;
+
                         return (
-                          <TableRow key={row.id} hover sx={{ backgroundColor: rowBg }}>
+                          <TableRow 
+                            key={row.id} 
+                            hover 
+                            onClick={() => setSelectedTransactionId(row.id)}
+                            sx={{ 
+                              backgroundColor: displayBg, 
+                              cursor: 'pointer',
+                              ...(isSelected && {
+                                borderLeft: `4px solid ${theme.palette.primary.main}`,
+                                '& td': { fontWeight: 600 }
+                              })
+                            }}
+                          >
                             <TableCell sx={{ fontWeight: 800, whiteSpace: 'nowrap' }}>
                               {`${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}.${String(row.dealDay).padStart(2, '0')}`}
                             </TableCell>
@@ -1852,6 +1947,24 @@ export default function App() {
                 />
               </Paper>
             </Grid>
+
+            {/* Apartment Location Map Section */}
+            {!loading && filteredTransactions.length > 0 && (
+              <Grid size={12}>
+                <ApartmentMap
+                  transaction={selectedTransaction}
+                  regionName={selectedRegion?.name || ""}
+                  filteredTransactions={filteredTransactions}
+                  onSelectTransaction={(id) => {
+                    setSelectedTransactionId(id);
+                    const el = document.getElementById('apartment-location-map-section');
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth' });
+                    }
+                  }}
+                />
+              </Grid>
+            )}
           </Grid>
         )}
         </Container>

@@ -1,5 +1,5 @@
 /**
- * Global Constants and Types for Insight Estate Pro
+ * Global Constants and Types for Real Estate Explorer
  */
 
 export enum TradeType {
@@ -20,6 +20,7 @@ export interface Transaction {
   dong: string;
   pyeong: number; // Calculated
   id: string;
+  jibun?: string;
   // Rent specific fields
   contractLevel?: string; // 신규/갱신
   useRequestRenew?: string; // 갱신요구권 사용여부
