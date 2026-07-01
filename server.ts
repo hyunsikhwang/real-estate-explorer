@@ -60,8 +60,19 @@ function maskApiKey(urlStr: string): string {
 import http from "http";
 import https from "https";
 
-const customHttpAgent = new http.Agent({ keepAlive: false });
-const customHttpsAgent = new https.Agent({ keepAlive: false, rejectUnauthorized: false });
+const customHttpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 100,
+  maxFreeSockets: 10,
+  timeout: 60000,
+});
+const customHttpsAgent = new https.Agent({
+  keepAlive: true,
+  rejectUnauthorized: false,
+  maxSockets: 100,
+  maxFreeSockets: 10,
+  timeout: 60000,
+});
 
 async function vworldAxiosGet(url: string, referer: string, responseType: "json" | "arraybuffer" = "json"): Promise<any> {
   // Always log the complete request URL to the server console
@@ -70,22 +81,19 @@ async function vworldAxiosGet(url: string, referer: string, responseType: "json"
   const headers: Record<string, string> = {
     "Accept": "application/json, text/plain, image/*, */*",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Connection": "keep-alive",
   };
 
   if (referer) {
     headers["Referer"] = referer;
   }
 
-  const agent = new https.Agent({
-    rejectUnauthorized: false,
-    keepAlive: false, // Disabling keep-alive prevents socket hang up on old/government servers
-  });
-
   try {
     const response = await axios.get(url, {
       headers,
       responseType,
-      httpsAgent: agent,
+      httpsAgent: customHttpsAgent,
+      httpAgent: customHttpAgent,
       timeout: 15000, // Slightly longer timeout
       validateStatus: () => true,
     });
@@ -415,68 +423,112 @@ async function startServer() {
     queryParams.set("key", activeKey);
     queryParams.set("domain", activeDomain);
     
-    const host = "https://api.vworld.kr";
-    const url = `${host}/req/${service}?${queryParams.toString()}`;
-    
-    try {
-      console.log(`[VWorld Proxy Request] Service: ${service}, URL: ${url}, Domain Param: ${activeDomain}, Referer: ${activeDomain}`);
-      // Use the client's provided domain as both domain param and Referer header to ensure a perfect match!
-      const response = await vworldAxiosGet(url, activeDomain);
+    // 1.5. Fast path using known-working global config if the client didn't supply an explicit key
+    if (activeVWorldConfig && !clientKey) {
+      const cachedKey = activeVWorldConfig.key;
+      const cachedReferer = activeVWorldConfig.referer;
+      const cachedHost = activeVWorldConfig.host;
       
-      const responseDataStr = typeof response.data === "object" ? JSON.stringify(response.data) : String(response.data);
-      const isJson = typeof response.data === "object" && response.data !== null;
-      const isHtml = typeof response.data === "string" && response.data.trim().startsWith("<");
+      const domainParam = cachedReferer.startsWith("http") ? cachedReferer : `http://${cachedReferer}`;
+      const fastQueryParams = new URLSearchParams(queryParams);
+      fastQueryParams.set("key", cachedKey);
+      fastQueryParams.set("domain", domainParam);
       
-      const hasAuthError = typeof response.data === "string" && (
-        response.data.includes("Service Not URL") || 
-        response.data.includes("인증") || 
-        response.data.includes("Unauthorized") || 
-        response.data.includes("Authentication")
-      );
-      
-      // Log this primary attempt
-      addVworldLog({
-        service,
-        url: maskApiKey(url),
-        referer: activeDomain,
-        domainParam: activeDomain,
-        status: response.status,
-        responseType: isJson ? "JSON" : (isHtml ? "HTML" : "TEXT"),
-        responseExcerpt: responseDataStr.substring(0, 500),
-        success: response.status === 200 && !isHtml && !hasAuthError
-      });
-      
-      if (response.status === 200) {
-        if (!isJson) {
-          console.error(`[VWorld Proxy non-JSON Response] URL: ${url}`);
-          console.error(`[VWorld Proxy Raw Content] (Length: ${responseDataStr.length}):\n${responseDataStr}`);
-        }
+      const url = `${cachedHost}/req/${service}?${fastQueryParams.toString()}`;
+      try {
+        console.log(`[VWorld Proxy Fast-Path] Service: ${service}, URL: ${url}, Domain: ${cachedReferer}`);
+        const response = await vworldAxiosGet(url, cachedReferer);
         
-        if (!isHtml && !hasAuthError) {
-          // Store active credentials in a globally shared object in the server so other requests (like tiles) can reuse it!
-          activeVWorldConfig = {
-            key: activeKey,
-            referer: activeDomain,
-            host: "https://api.vworld.kr"
-          };
+        const responseDataStr = typeof response.data === "object" ? JSON.stringify(response.data) : String(response.data);
+        const isJson = typeof response.data === "object" && response.data !== null;
+        const isHtml = typeof response.data === "string" && response.data.trim().startsWith("<");
+        const hasAuthError = typeof response.data === "string" && (
+          response.data.includes("Service Not URL") || 
+          response.data.includes("인증") || 
+          response.data.includes("Unauthorized") || 
+          response.data.includes("Authentication")
+        );
+        
+        if (response.status === 200 && !isHtml && !hasAuthError) {
+          console.log(`[VWorld Proxy Fast-Path Success] Service: ${service}`);
           return res.status(200).json(response.data);
         } else {
-          console.warn(`[VWorld Proxy Warning] Auth/HTML error with domain: ${activeDomain}. HTML starts with: ${responseDataStr.substring(0, 100)}`);
+          console.warn(`[VWorld Proxy Fast-Path Fail] Cached config returned error. Clearing cache and trying full lookup.`);
+          activeVWorldConfig = null;
         }
+      } catch (err: any) {
+        console.warn(`[VWorld Proxy Fast-Path Exception] ${err.message}. Clearing cache and trying full lookup.`);
+        activeVWorldConfig = null;
       }
-    } catch (err: any) {
-      console.warn(`[VWorld Proxy Error] ${err.message}. Trying backup local fallbacks...`);
-      addVworldLog({
-        service,
-        url: maskApiKey(url),
-        referer: activeDomain,
-        domainParam: activeDomain,
-        status: 500,
-        responseType: "EXCEPTION",
-        responseExcerpt: err.message,
-        success: false
-      });
     }
+    
+    const hosts = ["https://api.vworld.kr", "http://api.vworld.kr"];
+    
+    for (const host of hosts) {
+      const url = `${host}/req/${service}?${queryParams.toString()}`;
+      try {
+        console.log(`[VWorld Proxy Request] Service: ${service}, URL: ${url}, Domain Param: ${activeDomain}, Referer: ${activeDomain}`);
+        // Use the client's provided domain as both domain param and Referer header to ensure a perfect match!
+        const response = await vworldAxiosGet(url, activeDomain);
+        
+        const responseDataStr = typeof response.data === "object" ? JSON.stringify(response.data) : String(response.data);
+        const isJson = typeof response.data === "object" && response.data !== null;
+        const isHtml = typeof response.data === "string" && response.data.trim().startsWith("<");
+        
+        const hasAuthError = typeof response.data === "string" && (
+          response.data.includes("Service Not URL") || 
+          response.data.includes("인증") || 
+          response.data.includes("Unauthorized") || 
+          response.data.includes("Authentication")
+        );
+        
+        // Log this primary attempt
+        addVworldLog({
+          service: `${service} (${host.startsWith("https") ? "HTTPS" : "HTTP"})`,
+          url: maskApiKey(url),
+          referer: activeDomain,
+          domainParam: activeDomain,
+          status: response.status,
+          responseType: isJson ? "JSON" : (isHtml ? "HTML" : "TEXT"),
+          responseExcerpt: responseDataStr.substring(0, 500),
+          success: response.status === 200 && !isHtml && !hasAuthError
+        });
+        
+        if (response.status === 200) {
+          if (!isJson) {
+            console.error(`[VWorld Proxy non-JSON Response] URL: ${url}`);
+            console.error(`[VWorld Proxy Raw Content] (Length: ${responseDataStr.length}):\n${responseDataStr}`);
+          }
+          
+          if (!isHtml && !hasAuthError) {
+            // Store active credentials in a globally shared object in the server so other requests (like tiles) can reuse it!
+            activeVWorldConfig = {
+              key: activeKey,
+              referer: activeDomain,
+              host
+            };
+            return res.status(200).json(response.data);
+          } else {
+            console.warn(`[VWorld Proxy Warning] Auth/HTML error with domain: ${activeDomain}. HTML starts with: ${responseDataStr.substring(0, 100)}`);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[VWorld Proxy Error] ${host} - ${err.message}. Trying fallback...`);
+        addVworldLog({
+          service: `${service} (${host.startsWith("https") ? "HTTPS" : "HTTP"})`,
+          url: maskApiKey(url),
+          referer: activeDomain,
+          domainParam: activeDomain,
+          status: 500,
+          responseType: "EXCEPTION",
+          responseExcerpt: err.message,
+          success: false
+        });
+      }
+    }
+
+    // Default backup host for subsequent backup attempts (we use http for higher reliability if https failed)
+    const host = "http://api.vworld.kr";
 
     // Backup 1: Try with key but fallback to 'http://localhost:3000' as domain/referer (extremely common registered domain for local testing)
     const fallbackDomains = [
@@ -526,7 +578,7 @@ async function startServer() {
             activeVWorldConfig = {
               key: activeKey,
               referer: fallbackDom,
-              host: "https://api.vworld.kr"
+              host
             };
             return res.status(200).json(response.data);
           }
@@ -617,7 +669,7 @@ async function startServer() {
     referers.push("https://api.vworld.kr");
     referers.push("localhost");
 
-    const hosts = ["https://api.vworld.kr"];
+    const hosts = ["https://api.vworld.kr", "http://api.vworld.kr"];
 
     // 1순위: 이미 작동함이 확인된 활성 설정이 있다면 그것으로 먼저 시도
     if (activeVWorldConfig) {
@@ -722,8 +774,8 @@ async function startServer() {
     referers.push("https://api.vworld.kr");
     referers.push("localhost");
 
-    const hosts = ["https://api.vworld.kr"];
-    const dataSets = ["LP_PA_CBND_BUBUN", "LP_PA_CBND_BONBUN", "LP_PA_CBND"];
+    const hosts = ["https://api.vworld.kr", "http://api.vworld.kr"];
+    const dataSets = ["LP_PA_CBND", "LP_PA_CBND_BUBUN", "LP_PA_CBND_BONBUN"];
 
     // 0단계: 전역 활성 작동 설정이 있다면 최우선 시도
     if (activeVWorldConfig) {
@@ -812,37 +864,76 @@ async function startServer() {
 
   // VWorld 타일용 활성 설정 임시 캐시 (매번 반복 연산을 방지하여 타일 로딩을 극도로 빠르게 처리)
   let cachedTileConfig: { key: string; referer: string } | null = null;
+  let findingTilePromise: Promise<{ key: string; referer: string } | null> | null = null;
+
+  async function findWorkingTileConfig(reqRefererHeader?: string): Promise<{ key: string; referer: string } | null> {
+    if (cachedTileConfig) return cachedTileConfig;
+    if (findingTilePromise) return findingTilePromise;
+
+    findingTilePromise = (async () => {
+      console.log("[VWorld WMTS] Starting synchronized check to find a working key/referer combination...");
+      const keys = [];
+      if (process.env.VITE_VWORLD_API_KEY) {
+        keys.push(process.env.VITE_VWORLD_API_KEY);
+      }
+      keys.push("CE4DEC2E-CE4D-3AC4-8A8E-E575231D12E9");
+      keys.push("767B7AD0-CA3E-3BC3-A449-746658820988");
+
+      const referers = [];
+      if (reqRefererHeader) {
+        try {
+          const parsed = new URL(reqRefererHeader);
+          referers.push(parsed.origin);
+        } catch (e) {
+          referers.push(reqRefererHeader);
+        }
+      }
+      referers.push("http://localhost:3000");
+      referers.push("http://localhost");
+      referers.push("http://127.0.0.1:3000");
+      referers.push("http://127.0.0.1");
+      referers.push("https://api.vworld.kr");
+      referers.push("http://api.vworld.kr");
+      referers.push("localhost");
+
+      const hosts = ["https://api.vworld.kr", "http://api.vworld.kr"];
+      // Use a test tile that exists (e.g. Base/12/1585/3492)
+      const testTile = { z: "12", x: "1585", y: "3492" };
+
+      for (const host of hosts) {
+        for (const key of keys) {
+          for (const referer of referers) {
+            try {
+              // Be gentle to avoid triggering VWorld's rate limiting
+              await new Promise(resolve => setTimeout(resolve, 50));
+              const url = `${host}/req/wmts/1.0.0/${key}/Base/${testTile.z}/${testTile.y}/${testTile.x}.png`;
+              const response = await vworldAxiosGet(url, referer, "arraybuffer");
+              const contentType = String(response.headers["content-type"] || "");
+              if (response.status === 200 && contentType.includes("image")) {
+                console.log(`[VWorld WMTS Diagnostic] Working config found: Key=${key.substring(0, 5)}..., Referer=${referer}`);
+                const config = { key, referer };
+                cachedTileConfig = config;
+                return config;
+              }
+            } catch (err) {
+              // Try next
+            }
+          }
+        }
+      }
+      console.warn("[VWorld WMTS Diagnostic] Failed to find any working VWorld WMTS configuration.");
+      return null;
+    })();
+
+    const result = await findingTilePromise;
+    findingTilePromise = null;
+    return result;
+  }
 
   async function fetchTileWithFallback(layer: string, z: string, x: string, y: string, reqRefererHeader?: string): Promise<{ buffer: Buffer; contentType: string } | null> {
-    const keys = [];
-    if (process.env.VITE_VWORLD_API_KEY) {
-      keys.push(process.env.VITE_VWORLD_API_KEY);
-    }
-    keys.push("CE4DEC2E-CE4D-3AC4-8A8E-E575231D12E9");
-    keys.push("767B7AD0-CA3E-3BC3-A449-746658820988");
-
-    const referers = [];
-    if (reqRefererHeader) {
-      try {
-        const parsed = new URL(reqRefererHeader);
-        referers.push(parsed.origin);
-      } catch (e) {
-        referers.push(reqRefererHeader);
-      }
-    }
-    referers.push("http://localhost:3000");
-    referers.push("http://localhost");
-    referers.push("http://127.0.0.1:3000");
-    referers.push("http://127.0.0.1");
-    referers.push("http://api.vworld.kr");
-    referers.push("https://api.vworld.kr");
-    referers.push("localhost");
-
-    const hosts = ["https://api.vworld.kr"];
-
-    // 0순위: GetFeature나 Geocode에서 정상 작동이 100% 입증된 전역 설정을 우선 로드
-    const activeKey = activeVWorldConfig?.key || cachedTileConfig?.key;
-    const activeReferer = activeVWorldConfig?.referer || cachedTileConfig?.referer;
+    // 0순위: 기존 지적도 검색에서 동작 성공한 전역 설정 또는 캐시를 우선 활용
+    let activeKey = activeVWorldConfig?.key || cachedTileConfig?.key;
+    let activeReferer = activeVWorldConfig?.referer || cachedTileConfig?.referer;
     const activeHost = activeVWorldConfig?.host || "https://api.vworld.kr";
 
     if (activeKey && activeReferer) {
@@ -851,50 +942,30 @@ async function startServer() {
         const response = await vworldAxiosGet(url, activeReferer, "arraybuffer");
         const contentType = String(response.headers["content-type"] || "");
         if (response.status === 200 && contentType.includes("image")) {
-          const buffer = response.data;
-          // 실제로 잘 작동하므로 캐시를 최신화해 둡니다.
-          cachedTileConfig = { key: activeKey, referer: activeReferer };
-          return { buffer: Buffer.from(buffer), contentType };
+          return { buffer: Buffer.from(response.data), contentType };
         }
       } catch (err) {
-        // 전역 설정 실패 시 일반 루프로 폴백
+        // 특정 실패 발생 시 캐시 무효화하고 아래 루프로 진입
+        cachedTileConfig = null;
+        if (activeVWorldConfig) {
+          activeVWorldConfig = null;
+        }
       }
     }
 
-    if (cachedTileConfig) {
-      for (const host of hosts) {
-        try {
-          const url = `${host}/req/wmts/1.0.0/${cachedTileConfig.key}/${layer}/${z}/${y}/${x}.png`;
-          const response = await vworldAxiosGet(url, cachedTileConfig.referer, "arraybuffer");
-          const contentType = String(response.headers["content-type"] || "");
-          if (response.status === 200 && contentType.includes("image")) {
-            const buffer = response.data;
-            return { buffer: Buffer.from(buffer), contentType };
-          }
-        } catch (err) {
-          // 다음 호스트 시도
+    // 1순위: 캐시가 없는 경우 단 한 번만 실행되는 동기화된 찾기 작업을 통해 조합 획득
+    const workingConfig = await findWorkingTileConfig(reqRefererHeader);
+    if (workingConfig) {
+      try {
+        const url = `https://api.vworld.kr/req/wmts/1.0.0/${workingConfig.key}/${layer}/${z}/${y}/${x}.png`;
+        const response = await vworldAxiosGet(url, workingConfig.referer, "arraybuffer");
+        const contentType = String(response.headers["content-type"] || "");
+        if (response.status === 200 && contentType.includes("image")) {
+          return { buffer: Buffer.from(response.data), contentType };
         }
-      }
-      cachedTileConfig = null; // 실패 시 초기화 후 재생성 시도
-    }
-
-    for (const host of hosts) {
-      for (const key of keys) {
-        for (const referer of referers) {
-          try {
-            const url = `${host}/req/wmts/1.0.0/${key}/${layer}/${z}/${y}/${x}.png`;
-            const response = await vworldAxiosGet(url, referer, "arraybuffer");
-            const contentType = String(response.headers["content-type"] || "");
-            if (response.status === 200 && contentType.includes("image")) {
-              const buffer = response.data;
-              cachedTileConfig = { key, referer };
-              console.log(`[VWorld WMTS] Working config found & cached. Host: ${host}, Key: ${key.substring(0, 5)}..., Referer: ${referer}`);
-              return { buffer: Buffer.from(buffer), contentType };
-            }
-          } catch (err) {
-            // 다음 조합 시도
-          }
-        }
+      } catch (err) {
+        // 실패 시 캐시 초기화
+        cachedTileConfig = null;
       }
     }
 

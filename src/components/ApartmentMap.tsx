@@ -171,13 +171,34 @@ export default function ApartmentMap({
       vworldBaseLayerRef.current = null;
     }
 
+    const activeKey = vworldKey || DEFAULT_VWORLD_KEY;
+    const directUrl = `https://api.vworld.kr/req/wmts/1.0.0/${activeKey}/Base/{z}/{y}/{x}.png`;
+
     const newBase = new ol.layer.Tile({
       source: new ol.source.XYZ({
-        url: `/api/map/vworld-base/{z}/{x}/{y}.png`,
-        crossOrigin: "anonymous",
+        url: directUrl,
         attributions: "VWorld",
       }),
       zIndex: 1,
+    });
+
+    // Fallback to server proxy on direct tile load error
+    newBase.getSource().setTileLoadFunction((tile: any, src: string) => {
+      const img = tile.getImage();
+      img.onerror = () => {
+        const match = src.match(/\/Base\/(\d+)\/(\d+)\/(\d+)\.png/);
+        if (match) {
+          const z = match[1];
+          const y = match[2];
+          const x = match[3];
+          const fallbackSrc = `/api/map/vworld-base/${z}/${x}/${y}.png`;
+          if (img.src !== fallbackSrc) {
+            console.warn(`[Base Tile] Direct load failed for ${src}. Falling back to proxy: ${fallbackSrc}`);
+            img.src = fallbackSrc;
+          }
+        }
+      };
+      img.src = src;
     });
 
     vworldBaseLayerRef.current = newBase;
@@ -196,14 +217,35 @@ export default function ApartmentMap({
       vworldCadastralLayerRef.current = null;
     }
 
+    const activeKey = vworldKey || DEFAULT_VWORLD_KEY;
+    const directUrl = `https://api.vworld.kr/req/wmts/1.0.0/${activeKey}/LP_PA_CBND_BUBUN/{z}/{y}/{x}.png`;
+
     const newCadastral = new ol.layer.Tile({
       source: new ol.source.XYZ({
-        url: `/api/map/cadastral/{z}/{x}/{y}.png`,
-        crossOrigin: "anonymous",
+        url: directUrl,
         attributions: "VWorld Cadastral",
       }),
       opacity: 0.7,
       zIndex: 2,
+    });
+
+    // Fallback to server proxy on direct tile load error
+    newCadastral.getSource().setTileLoadFunction((tile: any, src: string) => {
+      const img = tile.getImage();
+      img.onerror = () => {
+        const match = src.match(/\/LP_PA_CBND_BUBUN\/(\d+)\/(\d+)\/(\d+)\.png/) || src.match(/\/LP_PA_CBND\/(\d+)\/(\d+)\/(\d+)\.png/);
+        if (match) {
+          const z = match[1];
+          const y = match[2];
+          const x = match[3];
+          const fallbackSrc = `/api/map/cadastral/${z}/${x}/${y}.png`;
+          if (img.src !== fallbackSrc) {
+            console.warn(`[Cadastral Tile] Direct load failed for ${src}. Falling back to proxy: ${fallbackSrc}`);
+            img.src = fallbackSrc;
+          }
+        }
+      };
+      img.src = src;
     });
 
     vworldCadastralLayerRef.current = newCadastral;
@@ -319,36 +361,76 @@ export default function ApartmentMap({
     }
   }, [showCadastral, vworldKey]);
 
-  // Fetch helper with proxy-first and client-direct failover
+  // Fetch helper with Client-Direct-First and Server-Proxy failover
   const fetchJson = async (url: string): Promise<any> => {
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          'Accept': 'application/json',
+    // If the URL is for VWorld, try calling VWorld directly from the browser first using JSONP!
+    // Since JSONP bypasses CORS completely, and the user is in Korea (where VWorld is not geo-blocked)
+    // with a Korean IP, this direct browser-side call is extremely fast, reliable, and bypasses Tokyo GCP IP blocking.
+    if (url.startsWith("/api/vworld/")) {
+      const directUrl = url.replace("/api/vworld/", "https://api.vworld.kr/req/");
+      try {
+        console.log(`[VWorld Client] Attempting direct browser-side JSONP call to: ${directUrl}`);
+        
+        const data = await new Promise<any>((resolve, reject) => {
+          const callbackName = 'vworldCallback_' + Math.random().toString(36).substring(2, 9);
+          const timeoutId = setTimeout(() => {
+            cleanup();
+            reject(new Error("JSONP 요청 시간 초과 (5초)"));
+          }, 5000);
+
+          const cleanup = () => {
+            clearTimeout(timeoutId);
+            const el = document.getElementById(scriptId);
+            if (el) el.remove();
+            delete (window as any)[callbackName];
+          };
+
+          const scriptId = 'jsonp_' + callbackName;
+          (window as any)[callbackName] = (jsonData: any) => {
+            cleanup();
+            resolve(jsonData);
+          };
+
+          // Attach callback parameter
+          const separator = directUrl.includes('?') ? '&' : '?';
+          const finalUrl = `${directUrl}${separator}callback=${callbackName}`;
+
+          const script = document.createElement('script');
+          script.id = scriptId;
+          script.src = finalUrl;
+          script.onerror = (err) => {
+            cleanup();
+            reject(new Error("JSONP Script load error (CORS/Network error)"));
+          };
+
+          document.body.appendChild(script);
+        });
+
+        // Validate JSONP response
+        if (data && data.response) {
+          const status = data.response.status;
+          if (status === "OK") {
+            console.log(`[VWorld Client] Direct browser-side JSONP SUCCESS!`, data);
+            return data;
+          } else {
+            console.warn(`[VWorld Client] Direct JSONP returned non-OK status: ${status}`, data);
+          }
+        } else {
+          console.warn(`[VWorld Client] Direct JSONP returned invalid structure`, data);
         }
-      });
-    } catch (err: any) {
-      // If server proxy request fails (network error / socket hangup), fallback to direct browser client fetch
-      if (url.startsWith("/api/vworld/")) {
-        const directUrl = url.replace("/api/vworld/", "https://api.vworld.kr/req/");
-        console.warn(`VWorld proxy failed to connect. Retrying direct client-side call to VWorld: ${directUrl}`, err);
-        return fetchJson(directUrl);
+      } catch (jsonpErr: any) {
+        console.warn(`[VWorld Client] Direct browser-side JSONP failed: ${jsonpErr.message}. Falling back to standard proxy fetch.`);
       }
-      throw err;
     }
 
-    if (!response.ok) {
-      // If proxy returns 502 Bad Gateway or other server error, fallback to direct client-side fetch
-      if (url.startsWith("/api/vworld/") && (response.status === 502 || response.status === 504 || response.status === 403 || response.status === 500)) {
-        const directUrl = url.replace("/api/vworld/", "https://api.vworld.kr/req/");
-        console.warn(`VWorld proxy returned HTTP ${response.status}. Retrying direct client-side call: ${directUrl}`);
-        try {
-          return await fetchJson(directUrl);
-        } catch (fallbackErr) {
-          throw fallbackErr;
-        }
+    // Fallback or standard fetch: Call the server proxy or other APIs
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
       }
+    });
+
+    if (!response.ok) {
       const text = await response.text();
       throw new Error(`요청 실패: HTTP ${response.status} ${text.slice(0, 160)}`);
     }
@@ -356,19 +438,8 @@ export default function ApartmentMap({
     const text = await response.text();
     const trimmed = text.trim();
     if (trimmed.startsWith("<")) {
-      console.error(`[VWorld Client HTML Response Error] URL requested: ${url}\nRaw response body:`, trimmed);
-      
+      console.error(`[VWorld Proxy Response HTML Error] URL: ${url}\nRaw response:`, trimmed);
       if (trimmed.includes("Service Not URL") || trimmed.includes("인증") || trimmed.includes("Unauthorized") || trimmed.includes("Authentication")) {
-        // If proxy returned an HTML authentication error, try direct fallback
-        if (url.startsWith("/api/vworld/")) {
-          const directUrl = url.replace("/api/vworld/", "https://api.vworld.kr/req/");
-          console.warn(`VWorld proxy returned HTML auth error. Retrying direct client-side call: ${directUrl}`);
-          try {
-            return await fetchJson(directUrl);
-          } catch (fallbackErr) {
-            // ignore fallback error and throw original auth error
-          }
-        }
         throw new Error("VWorld API 인증 실패: 도메인 설정 또는 API 키가 유효하지 않습니다.");
       }
       throw new Error(`VWorld에서 HTML 응답이 수신되었습니다: "${trimmed.slice(0, 150)}" (API 설정을 확인하세요).`);
@@ -499,7 +570,7 @@ export default function ApartmentMap({
   };
 
   const fetchParcelBoundary = async (pnu: string, lon: number, lat: number) => {
-    const dataSets = ["LP_PA_CBND_BUBUN", "LP_PA_CBND_BONBUN", "LP_PA_CBND"];
+    const dataSets = ["LP_PA_CBND", "LP_PA_CBND_BUBUN", "LP_PA_CBND_BONBUN"];
     const errors: string[] = [];
 
     for (const dataSet of dataSets) {
@@ -765,6 +836,15 @@ export default function ApartmentMap({
     const cleanKey = apiKeyInput.trim();
     const cleanDomain = domainInput.trim();
     
+    // 마스킹된 인증키가 그대로 붙여넣어져 저장되는 것을 방지합니다.
+    if (cleanKey.includes("XXXX") || cleanKey.includes("xxxx")) {
+      setStatus({
+        text: "보안 마스킹 처리된 인증키(XXXX 포함)는 저장할 수 없습니다. 실제 발급받으신 원본 인증키를 입력해 주십시오.",
+        type: "error"
+      });
+      return;
+    }
+    
     if (cleanKey) {
       localStorage.setItem('vworld-map-api-key', cleanKey);
       setVworldKey(cleanKey);
@@ -979,9 +1059,12 @@ export default function ApartmentMap({
                 </div>
 
                 {/* Info Text */}
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  브이월드 서버와 우리 프록시 서버 간의 통신 상태를 실시간으로 추적합니다. 인증 오류 시 에러 원인이 여기에 상세히 기록됩니다.
-                </p>
+                <div className="text-[10px] text-slate-400 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex flex-col gap-1.5">
+                  <p>• 브이월드 서버와 우리 프록시 서버 간의 통신 상태를 실시간으로 추적합니다.</p>
+                  <p className="text-teal-400 font-medium">
+                    • [보안 안내] 로그 화면 상에는 API 인증키 유출 방지를 위해 일부 영역이 마스킹(<span className="font-mono bg-teal-950/40 px-1 py-0.5 rounded text-[9px] text-teal-300 border border-teal-800/20">858A-XXXX-XXXX-XXXX-04D2</span> 등) 처리되어 표기되나, <strong>실제 브이월드 API 전송 시에는 고객님의 원본 API 키가 완전히 보존되어 정상적으로 전달</strong>됩니다.
+                  </p>
+                </div>
 
                 {vworldLogs.length === 0 ? (
                   <div className="text-center py-6 text-slate-500 text-[11px] border border-dashed border-slate-800 rounded-xl">
