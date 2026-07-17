@@ -1,0 +1,14 @@
+node_modules/
+.npm-cache/
+.playwright-daemon/
+.playwright-server-registry/
+.pw-temp/
+output/playwright/
+build/
+dist/
+dist-server/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
