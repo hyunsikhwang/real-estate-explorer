@@ -45,4 +45,8 @@ const worker = {
       );
     }
 
-    return handler.fetch(reque
+    return handler.fetch(request, env, ctx);
+  },
+};
+
+export default worker;

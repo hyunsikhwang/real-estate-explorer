@@ -296,7 +296,12 @@ async function handleVWorld(request: Request, env: RuntimeEnv, url: URL) {
       configured,
       domain: config.domain,
       services: { addressSearch: configured, parcelGeometry: configured, cadastralWms: configured },
-    });
+      browserDirect: {
+        enabled: configured,
+        apiKey: config.apiKey,
+        domain: config.domain,
+      },
+    }, 200, { "Cache-Control": "no-store" });
   }
   ensureVWorldConfigured(config);
 
@@ -430,4 +435,13 @@ export async function handleApiRequest(request: Request, env: RuntimeEnv): Promi
     }
     if (url.pathname === "/api/transactions") return await handleTransactions(url, env);
     if (url.pathname.startsWith("/api/map/")) return await handleVWorld(request, env, url);
-    return
+    return json({ error: "API 경로를 찾을 수 없습니다." }, 404);
+  } catch (error) {
+    const known = error instanceof ApiError;
+    const status = known ? error.status : 500;
+    const code = known ? error.code : "INTERNAL_ERROR";
+    const message = known ? error.message : "요청 처리 중 오류가 발생했습니다.";
+    if (!known) console.error("[API]", error);
+    return json({ error: message, code }, status);
+  }
+}

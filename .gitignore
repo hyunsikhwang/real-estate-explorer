@@ -2,6 +2,7 @@ node_modules/
 .npm-cache/
 .playwright-daemon/
 .playwright-server-registry/
+.pw-localappdata/
 .pw-temp/
 output/playwright/
 build/
@@ -15,3 +16,4 @@ coverage/
 *.tsbuildinfo
 .env*
 !.env.example
+
