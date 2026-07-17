@@ -7,9 +7,11 @@ output/playwright/
 build/
 dist/
 dist-server/
+.next/
+.wrangler/
 coverage/
 .DS_Store
 *.log
+*.tsbuildinfo
 .env*
 !.env.example
-

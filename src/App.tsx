@@ -724,7 +724,7 @@ export default function App() {
             }
 
             // Compare Min
-            if (dep < extremes[monthKey].minDeposit) {
+            if (dep < extremes[monthKey].minDeposit!) {
               extremes[monthKey].minDeposit = dep;
               extremes[monthKey].minDepositIds = new Set([row.id]);
             } else if (dep === extremes[monthKey].minDeposit) {
@@ -750,7 +750,7 @@ export default function App() {
             }
 
             // Compare Min
-            if (rnt < extremes[monthKey].minRent) {
+            if (rnt < extremes[monthKey].minRent!) {
               extremes[monthKey].minRent = rnt;
               extremes[monthKey].minRentIds = new Set([row.id]);
             } else if (rnt === extremes[monthKey].minRent) {
@@ -1920,56 +1920,4 @@ export default function App() {
                                   {row.previousDeposit ? `${row.previousDeposit.toLocaleString()} / ${row.previousMonthlyRent?.toLocaleString()}` : "-"}
                                 </TableCell>
                               </>
-                            )}
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                <TablePagination
-                  rowsPerPageOptions={[10, 20, 50, 100, 200]}
-                  component="div"
-                  count={filteredTransactions.length}
-                  rowsPerPage={rowsPerPage}
-                  page={page}
-                  onPageChange={(event, newPage) => setPage(newPage)}
-                  onRowsPerPageChange={(event) => {
-                    setRowsPerPage(parseInt(event.target.value, 10));
-                    setPage(0);
-                  }}
-                  labelRowsPerPage="페이지당 줄 수:"
-                  labelDisplayedRows={({ from, to, count }) => `${from}-${to} / 전체 ${count !== -1 ? count : `현재 이상`}건`}
-                  sx={{
-                    borderTop: '1px solid #e2e8f0',
-                    bgcolor: '#fff',
-                  }}
-                />
-              </Paper>
-            </Grid>
-
-            {/* Apartment Location Map Section */}
-            {!loading && filteredTransactions.length > 0 && (
-              <Grid size={12}>
-                <ApartmentMap
-                  transaction={selectedTransaction}
-                  regionName={selectedRegion?.name || ""}
-                  filteredTransactions={filteredTransactions}
-                  onSelectTransaction={(id) => {
-                    setSelectedTransactionId(id);
-                    const el = document.getElementById('apartment-location-map-section');
-                    if (el) {
-                      el.scrollIntoView({ behavior: 'smooth' });
-                    }
-                  }}
-                />
-              </Grid>
-            )}
-          </Grid>
-        )}
-        </Container>
-      </Box>
-    </Box>
-  </ThemeProvider>
-  );
-}
+               
