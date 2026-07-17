@@ -724,7 +724,7 @@ export default function App() {
             }
 
             // Compare Min
-            if (dep < extremes[monthKey].minDeposit) {
+            if (dep < extremes[monthKey].minDeposit!) {
               extremes[monthKey].minDeposit = dep;
               extremes[monthKey].minDepositIds = new Set([row.id]);
             } else if (dep === extremes[monthKey].minDeposit) {
@@ -750,7 +750,7 @@ export default function App() {
             }
 
             // Compare Min
-            if (rnt < extremes[monthKey].minRent) {
+            if (rnt < extremes[monthKey].minRent!) {
               extremes[monthKey].minRent = rnt;
               extremes[monthKey].minRentIds = new Set([row.id]);
             } else if (rnt === extremes[monthKey].minRent) {
