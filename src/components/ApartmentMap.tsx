@@ -27,22 +27,21 @@ import {
   Server,
 } from 'lucide-react';
 import { Transaction } from '../types';
+import {
+  directBaseMapUrl,
+  directCadastralWmsParams,
+  directCadastralWmsUrl,
+  loadVWorldParcel,
+  searchVWorldParcels,
+  type BrowserVWorldConfiguration,
+  type ParcelCandidate,
+} from '../vworld-browser';
 
 interface ApartmentMapProps {
   transaction: Transaction | null;
   regionName: string;
   filteredTransactions: Transaction[];
   onSelectTransaction: (id: string) => void;
-}
-
-interface ParcelCandidate {
-  id: string;
-  title: string;
-  parcelAddress: string;
-  roadAddress: string;
-  pnu: string;
-  lon: number;
-  lat: number;
 }
 
 interface VWorldStatus {
@@ -52,6 +51,9 @@ interface VWorldStatus {
     addressSearch: boolean;
     parcelGeometry: boolean;
     cadastralWms: boolean;
+  };
+  browserDirect?: BrowserVWorldConfiguration & {
+    enabled: boolean;
   };
 }
 
@@ -210,6 +212,30 @@ export default function ApartmentMap({
   }, [configuration?.configured, showVWorldBase]);
 
   useEffect(() => {
+    const direct = configuration?.browserDirect;
+    if (!direct?.enabled || !direct.apiKey || !direct.domain) return;
+
+    vworldBaseLayerRef.current?.setSource(new XYZ({
+      url: directBaseMapUrl(direct),
+      maxZoom: 19,
+      attributions: '공간정보 오픈플랫폼 VWorld',
+    }));
+
+    const cadastralSource = new TileWMS({
+      url: directCadastralWmsUrl(),
+      params: directCadastralWmsParams(direct),
+      projection: 'EPSG:3857',
+      transition: 0,
+      attributions: '연속지적도 VWorld',
+    });
+    cadastralSource.on('tileloadstart', () => setOverlayState('loading'));
+    cadastralSource.on('tileloadend', () => setOverlayState('ready'));
+    cadastralSource.on('tileloaderror', () => setOverlayState('error'));
+    cadastralLayerRef.current?.setSource(cadastralSource);
+    cadastralSource.refresh();
+  }, [configuration?.browserDirect]);
+
+  useEffect(() => {
     const enabled = showCadastral && Boolean(configuration?.configured);
     cadastralLayerRef.current?.setVisible(enabled);
     if (enabled) cadastralLayerRef.current?.getSource()?.refresh();
@@ -248,10 +274,15 @@ export default function ApartmentMap({
     map.getView().animate({ center: fromLonLat([candidate.lon, candidate.lat]), zoom: 18, duration: 300 });
     setStatus({ tone: 'info', text: 'PNU 기준 연속지적도 경계를 조회하고 있습니다.' });
 
-    const endpoint = candidate.pnu
-      ? `/api/map/parcels/${candidate.pnu}`
-      : `/api/map/parcel-at-point?lon=${candidate.lon}&lat=${candidate.lat}`;
-    const collection = await readJson<Record<string, any>>(endpoint, signal);
+    const direct = configuration?.browserDirect;
+    const collection = direct?.enabled && direct.apiKey && direct.domain
+      ? await loadVWorldParcel(candidate, direct, signal)
+      : await readJson<Record<string, any>>(
+        candidate.pnu
+          ? `/api/map/parcels/${candidate.pnu}`
+          : `/api/map/parcel-at-point?lon=${candidate.lon}&lat=${candidate.lat}`,
+        signal,
+      );
     if (sequence !== requestSequenceRef.current) return;
 
     const features = new GeoJSON().readFeatures(collection, {
@@ -263,7 +294,7 @@ export default function ApartmentMap({
     setSelectedPnu(parcelPnu(candidate, features));
     fitToParcel();
     setStatus({ tone: 'success', text: `연속지적도 경계 ${features.length}건을 정확한 PNU 기준으로 표시했습니다.` });
-  }, [fitToParcel]);
+  }, [configuration?.browserDirect, fitToParcel]);
 
   const executeSearch = useCallback(async (query: string) => {
     const normalized = query.trim();
@@ -283,10 +314,13 @@ export default function ApartmentMap({
     setStatus({ tone: 'info', text: '지번 주소와 PNU를 확인하고 있습니다.' });
 
     try {
-      const result = await readJson<{ candidates: ParcelCandidate[] }>(
-        `/api/map/search?query=${encodeURIComponent(normalized)}`,
-        controller.signal,
-      );
+      const direct = configuration?.browserDirect;
+      const result = direct?.enabled && direct.apiKey && direct.domain
+        ? { candidates: await searchVWorldParcels(normalized, direct, controller.signal) }
+        : await readJson<{ candidates: ParcelCandidate[] }>(
+          `/api/map/search?query=${encodeURIComponent(normalized)}`,
+          controller.signal,
+        );
       if (sequence !== requestSequenceRef.current) return;
       setCandidates(result.candidates);
       if (result.candidates.length === 0) {
@@ -300,7 +334,7 @@ export default function ApartmentMap({
     } finally {
       if (sequence === requestSequenceRef.current) setBusy(false);
     }
-  }, [loadCandidate]);
+  }, [configuration?.browserDirect, loadCandidate]);
 
   useEffect(() => {
     if (!addressInfo?.address || !configuration?.configured) return;
@@ -413,15 +447,18 @@ export default function ApartmentMap({
 
           <div className="rounded-2xl border border-slate-200 p-3 text-xs text-slate-600">
             <div className="flex items-center gap-2 font-bold text-slate-800">
-              <Server size={15} /> 서버 연동 상태
+              <Server size={15} /> VWorld 연동 상태
             </div>
             <div className="mt-2 flex items-center justify-between">
               <span>VWorld API</span>
               <span className={configuration?.configured ? 'text-emerald-700' : 'text-rose-700'}>
-                {configuration?.configured ? '설정됨' : '설정 필요'}
+                {configuration?.browserDirect?.enabled ? '브라우저 직접 연결' : configuration?.configured ? '서버 연결' : '설정 필요'}
               </span>
             </div>
             {configuration?.domain && <p className="mt-1 break-all text-[11px] text-slate-400">등록 도메인: {configuration.domain}</p>}
+            {configuration?.browserDirect?.enabled && (
+              <p className="mt-1 text-[11px] text-slate-400">도메인 제한 VWorld 키를 사용해 지도에서 직접 조회합니다.</p>
+            )}
           </div>
 
           {candidates.length > 0 && (
@@ -486,3 +523,4 @@ export default function ApartmentMap({
     </section>
   );
 }
+

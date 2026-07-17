@@ -25,6 +25,22 @@ test("호스팅 상태 API는 키를 노출하지 않고 설정 여부만 반환
   assert.equal(JSON.stringify(body).includes("secret"), false);
 });
 
+test("VWorld 지도 상태 API는 승인된 브라우저 직접 연결 설정을 반환한다", async () => {
+  const response = await handleApiRequest(
+    new Request("https://example.com/api/map/status"),
+    { VWORLD_API_KEY: "domain-limited-key", VWORLD_DOMAIN: "https://example.com/" },
+  );
+  assert.equal(response?.status, 200);
+  assert.equal(response?.headers.get("cache-control"), "no-store");
+  const body = await response!.json() as any;
+  assert.equal(body.configured, true);
+  assert.deepEqual(body.browserDirect, {
+    enabled: true,
+    apiKey: "domain-limited-key",
+    domain: "https://example.com",
+  });
+});
+
 test("호스팅 WMS 프록시는 공식 연속지적도 레이어를 고정한다", async () => {
   let upstream = "";
   globalThis.fetch = async (input) => {

@@ -296,7 +296,12 @@ async function handleVWorld(request: Request, env: RuntimeEnv, url: URL) {
       configured,
       domain: config.domain,
       services: { addressSearch: configured, parcelGeometry: configured, cadastralWms: configured },
-    });
+      browserDirect: {
+        enabled: configured,
+        apiKey: config.apiKey,
+        domain: config.domain,
+      },
+    }, 200, { "Cache-Control": "no-store" });
   }
   ensureVWorldConfigured(config);
 
