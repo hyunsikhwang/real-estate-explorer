@@ -208,6 +208,7 @@ export function createVWorldRouter(httpClient: AxiosInstance = createHttpClient(
 
   router.get("/status", (req, res) => {
     const config = getVWorldConfiguration(req);
+    res.set("Cache-Control", "no-store");
     res.json({
       configured: Boolean(config.apiKey),
       domain: config.domain,
@@ -215,6 +216,11 @@ export function createVWorldRouter(httpClient: AxiosInstance = createHttpClient(
         addressSearch: Boolean(config.apiKey),
         parcelGeometry: Boolean(config.apiKey),
         cadastralWms: Boolean(config.apiKey),
+      },
+      browserDirect: {
+        enabled: Boolean(config.apiKey),
+        apiKey: config.apiKey,
+        domain: config.domain,
       },
     });
   });

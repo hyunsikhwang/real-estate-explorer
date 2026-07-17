@@ -24,7 +24,7 @@ VWORLD_DOMAIN=http://localhost:3000
 
 `VWORLD_DOMAIN`은 VWorld 인증키를 발급할 때 등록한 서비스 도메인과 정확히 같아야 합니다. 배포 환경에서는 실제 서비스의 `https://` 도메인으로 변경해야 합니다.
 
-API 키는 서버에서만 사용하며 브라우저 응답이나 번들에는 포함하지 않습니다. 기존 `VITE_VWORLD_API_KEY`도 이전 설정과의 호환을 위해 읽지만, 새 설정에는 `VWORLD_API_KEY` 사용을 권장합니다.
+공공데이터포털 키는 서버에서만 사용하며 브라우저 응답이나 번들에는 포함하지 않습니다. VWorld 키는 Sites 서버의 외부 호출 제한을 우회하기 위해 지도 화면에만 전달되어 브라우저에서 주소·필지·WMS를 직접 조회합니다. 따라서 반드시 VWorld 관리 화면에서 실제 서비스 도메인만 허용한 도메인 제한 키를 사용해야 합니다.
 
 ## 실행
 
@@ -37,7 +37,7 @@ npm run dev
 
 ## 외부 공개
 
-Sites 배포에서는 `DATA_GO_KR_SERVICE_KEY`, `VWORLD_API_KEY`, `VWORLD_DOMAIN`을 호스팅 환경변수로 설정합니다. 키는 소스 코드와 빌드 결과에 포함되지 않습니다.
+Sites 배포에서는 `DATA_GO_KR_SERVICE_KEY`, `VWORLD_API_KEY`, `VWORLD_DOMAIN`을 호스팅 환경변수로 설정합니다. 키는 소스 코드와 빌드 결과에는 포함되지 않지만, VWorld 키는 지도 직접 호출을 위해 `/api/map/status` 응답과 브라우저 네트워크 요청에서 확인할 수 있습니다.
 
 VWorld 인증키 관리 화면에는 배포 후 발급된 실제 `https://` 서비스 주소를 추가 등록해야 합니다. 도메인 등록 전에는 실거래가 조회는 사용할 수 있지만 VWorld 지도와 연속지적도 호출은 제한될 수 있습니다.
 
