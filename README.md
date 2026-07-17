@@ -1,6 +1,6 @@
 # 부동산 실거래가·연속지적도 조회
 
-국토교통부 실거래가와 VWorld 공간정보를 한 화면에서 조회하는 React·Express 애플리케이션입니다.
+국토교통부 실거래가와 VWorld 공간정보를 한 화면에서 조회하는 React 애플리케이션입니다. 로컬 실행과 Cloudflare Worker 기반 Sites 배포를 지원합니다.
 
 ## 주요 기능
 
@@ -34,6 +34,12 @@ npm run dev
 ```
 
 브라우저에서 `http://localhost:3000`에 접속합니다.
+
+## 외부 공개
+
+Sites 배포에서는 `DATA_GO_KR_SERVICE_KEY`, `VWORLD_API_KEY`, `VWORLD_DOMAIN`을 호스팅 환경변수로 설정합니다. 키는 소스 코드와 빌드 결과에 포함되지 않습니다.
+
+VWorld 인증키 관리 화면에는 배포 후 발급된 실제 `https://` 서비스 주소를 추가 등록해야 합니다. 도메인 등록 전에는 실거래가 조회는 사용할 수 있지만 VWorld 지도와 연속지적도 호출은 제한될 수 있습니다.
 
 ## 검증
 
