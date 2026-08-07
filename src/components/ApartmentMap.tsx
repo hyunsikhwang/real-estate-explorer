@@ -246,12 +246,12 @@ export default function ApartmentMap({
     const map = mapRef.current;
     if (!map) return;
     const extent = parcelSourceRef.current.getExtent();
-    if (!isEmptyExtent(extent)) {
+    if (extent && !isEmptyExtent(extent)) {
       map.getView().fit(extent, { padding: [70, 70, 70, 70], maxZoom: 19, duration: 300 });
       return;
     }
     const markerExtent = markerSourceRef.current.getExtent();
-    if (!isEmptyExtent(markerExtent)) {
+    if (markerExtent && !isEmptyExtent(markerExtent)) {
       map.getView().fit(markerExtent, { padding: [70, 70, 70, 70], maxZoom: 18, duration: 300 });
     }
   }, []);

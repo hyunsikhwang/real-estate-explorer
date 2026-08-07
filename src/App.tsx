@@ -66,6 +66,7 @@ import {
 import { Transaction, TradeType, Region } from './types';
 import confetti from 'canvas-confetti';
 import ApartmentMap from './components/ApartmentMap';
+import { findOverallExtremeIds, isTransactionWithinDateRange } from './transaction-analysis';
 
 // --- Utility Functions ---
 const parsePrice = (val: any) => {
@@ -77,6 +78,34 @@ const parsePrice = (val: any) => {
 const calcPyeong = (m2: number) => Math.round(m2 / 3.305);
 
 const DRAWER_WIDTH = 320;
+
+type TableFilters = {
+  dateFrom: string;
+  dateTo: string;
+  contractLevel: string;
+  useRequestRenew: string;
+  floor: string[];
+  dong: string;
+  priceMin: string;
+  priceMax: string;
+  rentMin: string;
+  rentMax: string;
+  areaCategory: string[];
+};
+
+const createEmptyTableFilters = (): TableFilters => ({
+  dateFrom: '',
+  dateTo: '',
+  contractLevel: '',
+  useRequestRenew: '',
+  floor: [],
+  dong: '',
+  priceMin: '',
+  priceMax: '',
+  rentMin: '',
+  rentMax: '',
+  areaCategory: [],
+});
 
 const darkTheme = createTheme({
   typography: {
@@ -149,30 +178,10 @@ export default function App() {
   const [endMonth, setEndMonth] = useState(new Date().getMonth() + 1);
 
   // Table Column Filters DRAFT (for keyboard entry)
-  const [tableFiltersDraft, setTableFiltersDraft] = useState({
-    contractLevel: '',
-    useRequestRenew: '',
-    floor: [] as string[],
-    dong: '',
-    priceMin: '',
-    priceMax: '',
-    rentMin: '',
-    rentMax: '',
-    areaCategory: [] as string[]
-  });
+  const [tableFiltersDraft, setTableFiltersDraft] = useState<TableFilters>(createEmptyTableFilters);
 
   // Committed Table Column Filters (applied on Enter)
-  const [tableFilters, setTableFilters] = useState({
-    contractLevel: '',
-    useRequestRenew: '',
-    floor: [] as string[],
-    dong: '',
-    priceMin: '',
-    priceMax: '',
-    rentMin: '',
-    rentMax: '',
-    areaCategory: [] as string[]
-  });
+  const [tableFilters, setTableFilters] = useState<TableFilters>(createEmptyTableFilters);
 
   const [lastWorkingFilters, setLastWorkingFilters] = useState<{
     keywordDraft: string;
@@ -217,17 +226,7 @@ export default function App() {
     setAllTransactions([]); // Clear previous results
 
     // Reset table-specific column filters automatically upon new search
-    const initialFilters = {
-      contractLevel: '',
-      useRequestRenew: '',
-      floor: [] as string[],
-      dong: '',
-      priceMin: '',
-      priceMax: '',
-      rentMin: '',
-      rentMax: '',
-      areaCategory: [] as string[]
-    };
+    const initialFilters = createEmptyTableFilters();
     setTableFiltersDraft(initialFilters);
     setTableFilters(initialFilters);
     
@@ -399,33 +398,13 @@ export default function App() {
     setKeyword('');
     setPriceRange([0, 500000]);
     setAreaRange([0, 200]);
-    const initialFilters = {
-      contractLevel: '',
-      useRequestRenew: '',
-      floor: [] as string[],
-      dong: '',
-      priceMin: '',
-      priceMax: '',
-      rentMin: '',
-      rentMax: '',
-      areaCategory: [] as string[]
-    };
+    const initialFilters = createEmptyTableFilters();
     setTableFiltersDraft(initialFilters);
     setTableFilters(initialFilters);
   }, []);
 
   const clearTableFiltersOnly = useCallback(() => {
-    const initialFilters = {
-      contractLevel: '',
-      useRequestRenew: '',
-      floor: [] as string[],
-      dong: '',
-      priceMin: '',
-      priceMax: '',
-      rentMin: '',
-      rentMax: '',
-      areaCategory: [] as string[]
-    };
+    const initialFilters = createEmptyTableFilters();
     setTableFiltersDraft(initialFilters);
     setTableFilters(initialFilters);
   }, []);
@@ -436,6 +415,7 @@ export default function App() {
         const matchKeyword = keyword ? t.apartmentName.includes(keyword) : true;
         const matchPrice = t.price >= priceRange[0] && t.price <= priceRange[1];
         const matchArea = t.area >= areaRange[0] && t.area <= areaRange[1];
+        const matchDate = isTransactionWithinDateRange(t, tableFilters.dateFrom, tableFilters.dateTo);
         
         // Table Column Filters
         const matchContract = tableFilters.contractLevel ? t.contractLevel === tableFilters.contractLevel : true;
@@ -455,7 +435,7 @@ export default function App() {
           matchAreaCategory = tableFilters.areaCategory.includes(String(t.pyeong));
         }
 
-        return matchKeyword && matchPrice && matchArea && matchContract && matchRenew && matchFloor && matchDong &&
+        return matchKeyword && matchPrice && matchArea && matchDate && matchContract && matchRenew && matchFloor && matchDong &&
                matchTablePriceMin && matchTablePriceMax && matchTableRentMin && matchTableRentMax &&
                matchAreaCategory;
       })
@@ -636,132 +616,10 @@ export default function App() {
     }).sort((a: any, b: any) => a.name.localeCompare(b.name));
   }, [filteredTransactions, tradeType]);
 
-  const monthlyExtremes = useMemo(() => {
-    if (tradeType === TradeType.SALE) {
-      const extremes: Record<string, { 
-        maxPrice: number; 
-        minPrice: number;
-        maxPriceIds: Set<string>;
-        minPriceIds: Set<string>;
-        count: number;
-      }> = {};
-
-      filteredTransactions.forEach((row) => {
-        const monthKey = `${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}`;
-        const val = row.price;
-
-        if (!extremes[monthKey]) {
-          extremes[monthKey] = {
-            maxPrice: val,
-            minPrice: val,
-            maxPriceIds: new Set([row.id]),
-            minPriceIds: new Set([row.id]),
-            count: 1
-          };
-        } else {
-          extremes[monthKey].count += 1;
-          
-          if (val > extremes[monthKey].maxPrice) {
-            extremes[monthKey].maxPrice = val;
-            extremes[monthKey].maxPriceIds = new Set([row.id]);
-          } else if (val === extremes[monthKey].maxPrice) {
-            extremes[monthKey].maxPriceIds.add(row.id);
-          }
-
-          if (val < extremes[monthKey].minPrice) {
-            extremes[monthKey].minPrice = val;
-            extremes[monthKey].minPriceIds = new Set([row.id]);
-          } else if (val === extremes[monthKey].minPrice) {
-            extremes[monthKey].minPriceIds.add(row.id);
-          }
-        }
-      });
-      return { sale: extremes, rent: {} as Record<string, any> };
-    } else {
-      const extremes: Record<string, {
-        maxDeposit?: number;
-        minDeposit?: number;
-        maxDepositIds: Set<string>;
-        minDepositIds: Set<string>;
-        maxRent?: number;
-        minRent?: number;
-        maxRentIds: Set<string>;
-        minRentIds: Set<string>;
-        count: number;
-      }> = {};
-
-      filteredTransactions.forEach((row) => {
-        const monthKey = `${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}`;
-        const dep = row.price; // 보증금
-        const rnt = row.monthlyRent; // 월세
-
-        if (!extremes[monthKey]) {
-          extremes[monthKey] = {
-            maxDepositIds: new Set<string>(),
-            minDepositIds: new Set<string>(),
-            maxRentIds: new Set<string>(),
-            minRentIds: new Set<string>(),
-            count: 1
-          };
-        } else {
-          extremes[monthKey].count += 1;
-        }
-
-        // Deposit Max/Min (Only if monthlyRent === 0)
-        if (rnt === 0) {
-          if (extremes[monthKey].maxDeposit === undefined) {
-            extremes[monthKey].maxDeposit = dep;
-            extremes[monthKey].minDeposit = dep;
-            extremes[monthKey].maxDepositIds = new Set([row.id]);
-            extremes[monthKey].minDepositIds = new Set([row.id]);
-          } else {
-            // Compare Max
-            if (dep > extremes[monthKey].maxDeposit) {
-              extremes[monthKey].maxDeposit = dep;
-              extremes[monthKey].maxDepositIds = new Set([row.id]);
-            } else if (dep === extremes[monthKey].maxDeposit) {
-              extremes[monthKey].maxDepositIds.add(row.id);
-            }
-
-            // Compare Min
-            if (dep < extremes[monthKey].minDeposit!) {
-              extremes[monthKey].minDeposit = dep;
-              extremes[monthKey].minDepositIds = new Set([row.id]);
-            } else if (dep === extremes[monthKey].minDeposit) {
-              extremes[monthKey].minDepositIds.add(row.id);
-            }
-          }
-        }
-
-        // Rent Max/Min (Only if monthlyRent > 0)
-        if (rnt > 0) {
-          if (extremes[monthKey].maxRent === undefined) {
-            extremes[monthKey].maxRent = rnt;
-            extremes[monthKey].minRent = rnt;
-            extremes[monthKey].maxRentIds = new Set([row.id]);
-            extremes[monthKey].minRentIds = new Set([row.id]);
-          } else {
-            // Compare Max
-            if (rnt > extremes[monthKey].maxRent) {
-              extremes[monthKey].maxRent = rnt;
-              extremes[monthKey].maxRentIds = new Set([row.id]);
-            } else if (rnt === extremes[monthKey].maxRent) {
-              extremes[monthKey].maxRentIds.add(row.id);
-            }
-
-            // Compare Min
-            if (rnt < extremes[monthKey].minRent!) {
-              extremes[monthKey].minRent = rnt;
-              extremes[monthKey].minRentIds = new Set([row.id]);
-            } else if (rnt === extremes[monthKey].minRent) {
-              extremes[monthKey].minRentIds.add(row.id);
-            }
-          }
-        }
-      });
-      return { sale: {} as Record<string, any>, rent: extremes };
-    }
-  }, [filteredTransactions, tradeType]);
+  const overallExtremeIds = useMemo(
+    () => findOverallExtremeIds(filteredTransactions, tradeType),
+    [filteredTransactions, tradeType]
+  );
 
   const renderSidebar = (
     <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -1456,13 +1314,13 @@ export default function App() {
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(239, 68, 68, 0.08)', border: '1px solid #fca5a5' }} />
                             <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
-                              월별 최고가
+                              필터 결과 최고가 (1건)
                             </Typography>
                           </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(16, 185, 129, 0.08)', border: '1px solid #6ee7b7' }} />
                             <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
-                              월별 최저가
+                              필터 결과 최저가 (1건)
                             </Typography>
                           </Box>
                         </>
@@ -1471,25 +1329,25 @@ export default function App() {
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(239, 68, 68, 0.08)', border: '1px solid #fca5a5' }} />
                             <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
-                              보증금 최고 (월세 0 기준)
+                              보증금 최고 (전세 기준, 1건)
                             </Typography>
                           </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(16, 185, 129, 0.08)', border: '1px solid #6ee7b7' }} />
                             <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
-                              보증금 최저 (월세 0 기준)
+                              보증금 최저 (전세 기준, 1건)
                             </Typography>
                           </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(245, 158, 11, 0.08)', border: '1px solid #fcd34d' }} />
                             <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
-                              월세 최고 (월세 0 제외)
+                              월세 최고 (1건)
                             </Typography>
                           </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: 'rgba(59, 130, 246, 0.08)', border: '1px solid #93c5fd' }} />
                             <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>
-                              월세 최저 (월세 0 제외)
+                              월세 최저 (1건)
                             </Typography>
                           </Box>
                         </>
@@ -1500,7 +1358,41 @@ export default function App() {
                     <Table sx={{ minWidth: 650 }}>
                     <TableHead sx={{ backgroundColor: '#f8fafc' }}>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 800, color: theme.palette.primary.main, py: 1 }}>거래일</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: theme.palette.primary.main, py: 1, minWidth: 150 }}>
+                          거래일
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: 0.5 }}>
+                            <TextField
+                              type="date"
+                              size="small"
+                              variant="standard"
+                              value={tableFiltersDraft.dateFrom}
+                              onChange={(e) => {
+                                const dateFrom = e.target.value;
+                                setTableFiltersDraft((previous) => ({ ...previous, dateFrom }));
+                                setTableFilters((previous) => ({ ...previous, dateFrom }));
+                              }}
+                              slotProps={{
+                                htmlInput: { 'aria-label': '거래일 시작일' },
+                                input: { style: { fontSize: '10px' } },
+                              }}
+                            />
+                            <TextField
+                              type="date"
+                              size="small"
+                              variant="standard"
+                              value={tableFiltersDraft.dateTo}
+                              onChange={(e) => {
+                                const dateTo = e.target.value;
+                                setTableFiltersDraft((previous) => ({ ...previous, dateTo }));
+                                setTableFilters((previous) => ({ ...previous, dateTo }));
+                              }}
+                              slotProps={{
+                                htmlInput: { 'aria-label': '거래일 종료일' },
+                                input: { style: { fontSize: '10px' } },
+                              }}
+                            />
+                          </Box>
+                        </TableCell>
                         <TableCell sx={{ fontWeight: 700, py: 1 }}>
                           아파트명 (단지)
                           <TextField 
@@ -1726,39 +1618,12 @@ export default function App() {
                     </TableHead>
                     <TableBody>
                       {filteredTransactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((row) => {
-                        const monthKey = `${row.dealYear}.${String(row.dealMonth).padStart(2, '0')}`;
-                        
-                        let isMaxPrice = false;
-                        let isMinPrice = false;
-                        let isMaxDeposit = false;
-                        let isMinDeposit = false;
-                        let isMaxRent = false;
-                        let isMinRent = false;
-
-                        if (tradeType === TradeType.SALE) {
-                          const ext = monthlyExtremes.sale[monthKey];
-                          const isExtreme = ext && ext.count > 1 && ext.maxPrice !== ext.minPrice;
-                          isMaxPrice = isExtreme && ext.maxPriceIds.has(row.id);
-                          isMinPrice = isExtreme && ext.minPriceIds.has(row.id);
-                        } else {
-                          const ext = monthlyExtremes.rent[monthKey];
-                          if (ext && ext.count > 1) {
-                            // Deposit extremes (Only if row.monthlyRent === 0)
-                            if (row.monthlyRent === 0 && ext.maxDeposit !== undefined && ext.minDeposit !== undefined && ext.maxDeposit !== ext.minDeposit) {
-                              isMaxDeposit = ext.maxDepositIds.has(row.id);
-                              isMinDeposit = ext.minDepositIds.has(row.id);
-                            }
-                            // Rent extremes (Only if row.monthlyRent > 0)
-                            if (row.monthlyRent > 0 && ext.maxRent !== undefined && ext.minRent !== undefined) {
-                              if (ext.maxRent === ext.minRent) {
-                                isMaxRent = ext.maxRentIds.has(row.id);
-                              } else {
-                                isMaxRent = ext.maxRentIds.has(row.id);
-                                isMinRent = ext.minRentIds.has(row.id);
-                              }
-                            }
-                          }
-                        }
+                        const isMaxPrice = overallExtremeIds.maxPriceId === row.id;
+                        const isMinPrice = overallExtremeIds.minPriceId === row.id;
+                        const isMaxDeposit = overallExtremeIds.maxDepositId === row.id;
+                        const isMinDeposit = overallExtremeIds.minDepositId === row.id;
+                        const isMaxRent = overallExtremeIds.maxRentId === row.id;
+                        const isMinRent = overallExtremeIds.minRentId === row.id;
 
                         let rowBg = "inherit";
                         let textColor = "inherit";
