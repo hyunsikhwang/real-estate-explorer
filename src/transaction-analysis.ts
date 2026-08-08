@@ -9,6 +9,13 @@ export interface OverallExtremeIds {
   minRentId?: string;
 }
 
+export interface AreaFilterOption {
+  value: string;
+  area: number;
+  pyeong: number;
+  label: string;
+}
+
 const EARLIEST_TRANSACTION_YEAR: Record<TradeType, number> = {
   [TradeType.SALE]: 2006,
   [TradeType.RENT]: 2011,
@@ -39,6 +46,29 @@ export const isTransactionWithinDateRange = (
   const transactionDate = getTransactionDateKey(transaction);
   return (!dateFrom || transactionDate >= dateFrom) && (!dateTo || transactionDate <= dateTo);
 };
+
+export const getAreaFilterValue = (transaction: Transaction) => String(transaction.area);
+
+export const getAreaFilterOptions = (transactions: Transaction[]): AreaFilterOption[] => {
+  const options = new Map<string, AreaFilterOption>();
+
+  transactions.forEach((transaction) => {
+    const value = getAreaFilterValue(transaction);
+    if (!options.has(value)) {
+      options.set(value, {
+        value,
+        area: transaction.area,
+        pyeong: transaction.pyeong,
+        label: `${transaction.area}㎡ / ${transaction.pyeong}평`,
+      });
+    }
+  });
+
+  return Array.from(options.values()).sort((a, b) => a.area - b.area);
+};
+
+export const getFloorFilterOptions = (transactions: Transaction[]) =>
+  Array.from(new Set(transactions.map((transaction) => transaction.floor))).sort((a, b) => a - b);
 
 const findExtremeId = (
   transactions: Transaction[],

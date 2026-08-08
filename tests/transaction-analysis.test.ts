@@ -3,7 +3,10 @@ import test from 'node:test';
 import {
   findOverallExtremeIds,
   getAvailableTransactionYears,
+  getAreaFilterOptions,
+  getAreaFilterValue,
   getEarliestTransactionYear,
+  getFloorFilterOptions,
   getTransactionDateKey,
   isTransactionWithinDateRange,
 } from '../src/transaction-analysis';
@@ -37,6 +40,30 @@ test('거래 유형별 시작 연도부터 현재 연도까지 내림차순 선�
   assert.deepEqual(saleYears.slice(0, 3), [2026, 2025, 2024]);
   assert.equal(saleYears.at(-1), 2006);
   assert.equal(rentYears.at(-1), 2011);
+});
+
+test('면적 필터 옵션을 실제 제곱미터와 평 조합으로 중복 없이 정렬한다', () => {
+  const rows = [
+    transaction({ id: 'large', area: 84.97, pyeong: 26 }),
+    transaction({ id: 'small', area: 59.9, pyeong: 18 }),
+    transaction({ id: 'same-large', area: 84.97, pyeong: 26 }),
+  ];
+
+  assert.equal(getAreaFilterValue(rows[0]), '84.97');
+  assert.deepEqual(getAreaFilterOptions(rows), [
+    { value: '59.9', area: 59.9, pyeong: 18, label: '59.9㎡ / 18평' },
+    { value: '84.97', area: 84.97, pyeong: 26, label: '84.97㎡ / 26평' },
+  ]);
+});
+
+test('층 필터 옵션을 현재 거래 목록에서 중복 없이 정렬한다', () => {
+  const rows = [
+    transaction({ id: 'high', floor: 15 }),
+    transaction({ id: 'low', floor: 2 }),
+    transaction({ id: 'same-high', floor: 15 }),
+  ];
+
+  assert.deepEqual(getFloorFilterOptions(rows), [2, 15]);
 });
 
 test('거래일을 날짜 입력값과 비교 가능한 형식으로 만든다', () => {

@@ -69,7 +69,10 @@ import ApartmentMap from './components/ApartmentMap';
 import {
   findOverallExtremeIds,
   getAvailableTransactionYears,
+  getAreaFilterOptions,
+  getAreaFilterValue,
   getEarliestTransactionYear,
+  getFloorFilterOptions,
   isTransactionWithinDateRange,
 } from './transaction-analysis';
 
@@ -97,6 +100,13 @@ type TableFilters = {
   rentMax: string;
   areaCategory: string[];
 };
+
+type FacetFilterKey = 'areaCategory' | 'floor';
+
+const CLEAR_ALL_SELECTIONS = '__clear_all_selections__';
+
+const normalizeMultiSelectValue = (value: string | string[]) =>
+  typeof value === 'string' ? value.split(',') : value;
 
 const createEmptyTableFilters = (): TableFilters => ({
   dateFrom: '',
@@ -157,16 +167,6 @@ export default function App() {
   const [keywordDraft, setKeywordDraft] = useState('');
   const [keyword, setKeyword] = useState('');
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
-  const uniqueFloors = useMemo(() => {
-    const floors = allTransactions.map(t => t.floor);
-    const unique = Array.from(new Set(floors)).sort((a, b) => a - b);
-    return unique;
-  }, [allTransactions]);
-  const uniquePyeongs = useMemo(() => {
-    const pyeongs = allTransactions.map(t => t.pyeong);
-    const unique = Array.from(new Set(pyeongs)).sort((a, b) => a - b);
-    return unique;
-  }, [allTransactions]);
   const [chartMode, setChartMode] = useState<'individual' | 'converted'>('individual');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -421,43 +421,57 @@ export default function App() {
     setTableFilters(initialFilters);
   }, []);
 
+  const updateFacetFilter = useCallback((key: FacetFilterKey, values: string[]) => {
+    const nextValues = values.includes(CLEAR_ALL_SELECTIONS) ? [] : values;
+    setTableFiltersDraft((previous) => ({ ...previous, [key]: nextValues }));
+    setTableFilters((previous) => ({ ...previous, [key]: nextValues }));
+  }, []);
+
+  const matchesFilters = useCallback((transaction: Transaction, omittedFacet?: FacetFilterKey) => {
+    const matchKeyword = keyword ? transaction.apartmentName.includes(keyword) : true;
+    const matchPrice = transaction.price >= priceRange[0] && transaction.price <= priceRange[1];
+    const matchArea = transaction.area >= areaRange[0] && transaction.area <= areaRange[1];
+    const matchDate = isTransactionWithinDateRange(transaction, tableFilters.dateFrom, tableFilters.dateTo);
+    const matchContract = tableFilters.contractLevel ? transaction.contractLevel === tableFilters.contractLevel : true;
+    const matchRenew = tableFilters.useRequestRenew ? transaction.useRequestRenew === tableFilters.useRequestRenew : true;
+    const matchFloor = omittedFacet === 'floor' || tableFilters.floor.length === 0
+      ? true
+      : tableFilters.floor.includes(String(transaction.floor));
+    const matchDong = tableFilters.dong
+      ? (transaction.apartmentName.toLowerCase().includes(tableFilters.dong.toLowerCase()) || transaction.dong.toLowerCase().includes(tableFilters.dong.toLowerCase()))
+      : true;
+    const matchTablePriceMin = tableFilters.priceMin ? transaction.price >= Number(tableFilters.priceMin) : true;
+    const matchTablePriceMax = tableFilters.priceMax ? transaction.price <= Number(tableFilters.priceMax) : true;
+    const matchTableRentMin = tableFilters.rentMin ? transaction.monthlyRent >= Number(tableFilters.rentMin) : true;
+    const matchTableRentMax = tableFilters.rentMax ? transaction.monthlyRent <= Number(tableFilters.rentMax) : true;
+    const matchAreaCategory = omittedFacet === 'areaCategory' || tableFilters.areaCategory.length === 0
+      ? true
+      : tableFilters.areaCategory.includes(getAreaFilterValue(transaction));
+
+    return matchKeyword && matchPrice && matchArea && matchDate && matchContract && matchRenew && matchFloor && matchDong &&
+      matchTablePriceMin && matchTablePriceMax && matchTableRentMin && matchTableRentMax && matchAreaCategory;
+  }, [keyword, priceRange, areaRange, tableFilters]);
+
+  const areaFilterOptions = useMemo(
+    () => getAreaFilterOptions(allTransactions.filter((transaction) => matchesFilters(transaction, 'areaCategory'))),
+    [allTransactions, matchesFilters]
+  );
+
+  const floorFilterOptions = useMemo(
+    () => getFloorFilterOptions(allTransactions.filter((transaction) => matchesFilters(transaction, 'floor'))),
+    [allTransactions, matchesFilters]
+  );
+
   const filteredTransactions = useMemo(() => {
     return allTransactions
-      .filter(t => {
-        const matchKeyword = keyword ? t.apartmentName.includes(keyword) : true;
-        const matchPrice = t.price >= priceRange[0] && t.price <= priceRange[1];
-        const matchArea = t.area >= areaRange[0] && t.area <= areaRange[1];
-        const matchDate = isTransactionWithinDateRange(t, tableFilters.dateFrom, tableFilters.dateTo);
-        
-        // Table Column Filters
-        const matchContract = tableFilters.contractLevel ? t.contractLevel === tableFilters.contractLevel : true;
-        const matchRenew = tableFilters.useRequestRenew ? t.useRequestRenew === tableFilters.useRequestRenew : true;
-        const matchFloor = tableFilters.floor.length > 0 ? tableFilters.floor.includes(String(t.floor)) : true;
-        const matchDong = tableFilters.dong 
-          ? (t.apartmentName.toLowerCase().includes(tableFilters.dong.toLowerCase()) || t.dong.toLowerCase().includes(tableFilters.dong.toLowerCase()))
-          : true;
-
-        const matchTablePriceMin = tableFilters.priceMin ? t.price >= Number(tableFilters.priceMin) : true;
-        const matchTablePriceMax = tableFilters.priceMax ? t.price <= Number(tableFilters.priceMax) : true;
-        const matchTableRentMin = tableFilters.rentMin ? t.monthlyRent >= Number(tableFilters.rentMin) : true;
-        const matchTableRentMax = tableFilters.rentMax ? t.monthlyRent <= Number(tableFilters.rentMax) : true;
-        
-        let matchAreaCategory = true;
-        if (tableFilters.areaCategory.length > 0) {
-          matchAreaCategory = tableFilters.areaCategory.includes(String(t.pyeong));
-        }
-
-        return matchKeyword && matchPrice && matchArea && matchDate && matchContract && matchRenew && matchFloor && matchDong &&
-               matchTablePriceMin && matchTablePriceMax && matchTableRentMin && matchTableRentMax &&
-               matchAreaCategory;
-      })
+      .filter((transaction) => matchesFilters(transaction))
       .sort((a, b) => {
         // Sort by year, then month, then day descending
         if (b.dealYear !== a.dealYear) return b.dealYear - a.dealYear;
         if (b.dealMonth !== a.dealMonth) return b.dealMonth - a.dealMonth;
         return b.dealDay - a.dealDay;
       });
-  }, [allTransactions, keyword, priceRange, areaRange, tableFilters]);
+  }, [allTransactions, matchesFilters]);
 
   // Reset table page to 0 when filtered results change
   useEffect(() => {
@@ -1494,16 +1508,11 @@ export default function App() {
                             sx={{ fontSize: '11px', mt: 0.5 }}
                             value={tableFiltersDraft.areaCategory}
                             onChange={(e) => {
-                              const val = e.target.value as string[];
-                              setTableFiltersDraft(prev => {
-                                const updated = { ...prev, areaCategory: val };
-                                setTableFilters(updated);
-                                return updated;
-                              });
+                              updateFacetFilter('areaCategory', normalizeMultiSelectValue(e.target.value));
                             }}
                             renderValue={(selected) => {
                               if (!selected || selected.length === 0) {
-                                return <span style={{ color: '#aaa', fontSize: '11px' }}>전체 평형</span>;
+                                return <span style={{ color: '#aaa', fontSize: '11px' }}>전체 면적</span>;
                               }
                               return <span style={{ fontSize: '11px' }}>{selected.length}개 선택</span>;
                             }}
@@ -1515,15 +1524,21 @@ export default function App() {
                               }
                             } as any}
                           >
-                            {uniquePyeongs.map((py) => {
-                              const pyStr = String(py);
-                              return (
-                                <MenuItem key={pyStr} value={pyStr} sx={{ py: 0.25 }}>
-                                  <Checkbox checked={tableFiltersDraft.areaCategory.includes(pyStr)} size="small" sx={{ p: 0.5 }} />
-                                  <ListItemText primary={<span style={{ fontSize: '12px' }}>{pyStr}평</span>} />
-                                </MenuItem>
-                              );
-                            })}
+                            <MenuItem
+                              value={CLEAR_ALL_SELECTIONS}
+                              disabled={tableFiltersDraft.areaCategory.length === 0}
+                              sx={{ py: 0.5, color: theme.palette.primary.main }}
+                            >
+                              <RotateCcw size={14} style={{ marginRight: 8 }} />
+                              <ListItemText primary={<span style={{ fontSize: '12px', fontWeight: 700 }}>면적 선택 전체 해제</span>} />
+                            </MenuItem>
+                            <Divider />
+                            {areaFilterOptions.map((option) => (
+                              <MenuItem key={option.value} value={option.value} sx={{ py: 0.25 }}>
+                                <Checkbox checked={tableFiltersDraft.areaCategory.includes(option.value)} size="small" sx={{ p: 0.5 }} />
+                                <ListItemText primary={<span style={{ fontSize: '12px' }}>{option.label}</span>} />
+                              </MenuItem>
+                            ))}
                           </Select>
                         </TableCell>
                         <TableCell sx={{ fontWeight: 700, py: 1 }}>
@@ -1537,12 +1552,7 @@ export default function App() {
                             sx={{ fontSize: '11px', mt: 0.5 }}
                             value={tableFiltersDraft.floor}
                             onChange={(e) => {
-                              const val = e.target.value as string[];
-                              setTableFiltersDraft(prev => {
-                                const updated = { ...prev, floor: val };
-                                setTableFilters(updated);
-                                return updated;
-                              });
+                              updateFacetFilter('floor', normalizeMultiSelectValue(e.target.value));
                             }}
                             renderValue={(selected) => {
                               if (!selected || selected.length === 0) {
@@ -1558,7 +1568,16 @@ export default function App() {
                               }
                             } as any}
                           >
-                            {uniqueFloors.map((fl) => {
+                            <MenuItem
+                              value={CLEAR_ALL_SELECTIONS}
+                              disabled={tableFiltersDraft.floor.length === 0}
+                              sx={{ py: 0.5, color: theme.palette.primary.main }}
+                            >
+                              <RotateCcw size={14} style={{ marginRight: 8 }} />
+                              <ListItemText primary={<span style={{ fontSize: '12px', fontWeight: 700 }}>층 선택 전체 해제</span>} />
+                            </MenuItem>
+                            <Divider />
+                            {floorFilterOptions.map((fl) => {
                               const flStr = String(fl);
                               return (
                                 <MenuItem key={flStr} value={flStr} sx={{ py: 0.25 }}>
