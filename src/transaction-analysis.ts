@@ -9,6 +9,25 @@ export interface OverallExtremeIds {
   minRentId?: string;
 }
 
+const EARLIEST_TRANSACTION_YEAR: Record<TradeType, number> = {
+  [TradeType.SALE]: 2006,
+  [TradeType.RENT]: 2011,
+};
+
+export const getEarliestTransactionYear = (tradeType: TradeType) =>
+  EARLIEST_TRANSACTION_YEAR[tradeType];
+
+export const getAvailableTransactionYears = (
+  tradeType: TradeType,
+  currentYear = new Date().getFullYear()
+) => {
+  const earliestYear = getEarliestTransactionYear(tradeType);
+  return Array.from(
+    { length: Math.max(currentYear - earliestYear + 1, 0) },
+    (_, index) => currentYear - index
+  );
+};
+
 export const getTransactionDateKey = (transaction: Transaction) =>
   `${transaction.dealYear}-${String(transaction.dealMonth).padStart(2, '0')}-${String(transaction.dealDay).padStart(2, '0')}`;
 

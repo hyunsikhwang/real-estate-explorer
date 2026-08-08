@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   findOverallExtremeIds,
+  getAvailableTransactionYears,
+  getEarliestTransactionYear,
   getTransactionDateKey,
   isTransactionWithinDateRange,
 } from '../src/transaction-analysis';
@@ -21,6 +23,20 @@ const transaction = (overrides: Partial<Transaction>): Transaction => ({
   pyeong: 25,
   id: 'base',
   ...overrides,
+});
+
+test('매매와 전월세의 공식 공개 시작 연도를 반환한다', () => {
+  assert.equal(getEarliestTransactionYear(TradeType.SALE), 2006);
+  assert.equal(getEarliestTransactionYear(TradeType.RENT), 2011);
+});
+
+test('거래 유형별 시작 연도부터 현재 연도까지 내림차순 선택지를 만든다', () => {
+  const saleYears = getAvailableTransactionYears(TradeType.SALE, 2026);
+  const rentYears = getAvailableTransactionYears(TradeType.RENT, 2026);
+
+  assert.deepEqual(saleYears.slice(0, 3), [2026, 2025, 2024]);
+  assert.equal(saleYears.at(-1), 2006);
+  assert.equal(rentYears.at(-1), 2011);
 });
 
 test('거래일을 날짜 입력값과 비교 가능한 형식으로 만든다', () => {

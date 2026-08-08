@@ -66,7 +66,12 @@ import {
 import { Transaction, TradeType, Region } from './types';
 import confetti from 'canvas-confetti';
 import ApartmentMap from './components/ApartmentMap';
-import { findOverallExtremeIds, isTransactionWithinDateRange } from './transaction-analysis';
+import {
+  findOverallExtremeIds,
+  getAvailableTransactionYears,
+  getEarliestTransactionYear,
+  isTransactionWithinDateRange,
+} from './transaction-analysis';
 
 // --- Utility Functions ---
 const parsePrice = (val: any) => {
@@ -176,6 +181,13 @@ export default function App() {
   const [startMonth, setStartMonth] = useState(new Date().getMonth() + 1);
   const [endYear, setEndYear] = useState(new Date().getFullYear());
   const [endMonth, setEndMonth] = useState(new Date().getMonth() + 1);
+  const availableYears = useMemo(() => getAvailableTransactionYears(tradeType), [tradeType]);
+
+  useEffect(() => {
+    const earliestYear = getEarliestTransactionYear(tradeType);
+    setStartYear((year) => Math.max(year, earliestYear));
+    setEndYear((year) => Math.max(year, earliestYear));
+  }, [tradeType]);
 
   // Table Column Filters DRAFT (for keyboard entry)
   const [tableFiltersDraft, setTableFiltersDraft] = useState<TableFilters>(createEmptyTableFilters);
@@ -736,7 +748,7 @@ export default function App() {
               onChange={(e) => setStartYear(Number(e.target.value))}
               slotProps={{ select: { native: true } }}
             >
-              {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}년</option>)}
+              {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
             </TextField>
           </Grid>
           <Grid size={6}>
@@ -762,7 +774,7 @@ export default function App() {
               onChange={(e) => setEndYear(Number(e.target.value))}
               slotProps={{ select: { native: true } }}
             >
-              {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}년</option>)}
+              {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
             </TextField>
           </Grid>
           <Grid size={6}>
@@ -883,7 +895,7 @@ export default function App() {
               </Typography>
               {lastSearchPeriod && (
                 <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
-                   조회 기간: {lastSearchPeriod} (최근 1년)
+                   조회 기간: {lastSearchPeriod}
                 </Typography>
               )}
             </Box>
