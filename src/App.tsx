@@ -34,6 +34,7 @@ import {
   Select,
   MenuItem,
   Checkbox,
+  FormControlLabel,
   ListItemText,
 } from '@mui/material';
 import {
@@ -74,6 +75,7 @@ import {
   getEarliestTransactionYear,
   getFloorFilterOptions,
   isTransactionWithinDateRange,
+  matchesNumericRange,
 } from './transaction-analysis';
 
 // --- Utility Functions ---
@@ -175,6 +177,8 @@ export default function App() {
   // Filtering States
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 500000]);
   const [areaRange, setAreaRange] = useState<[number, number]>([0, 200]);
+  const [priceUpperUnbounded, setPriceUpperUnbounded] = useState(false);
+  const [areaUpperUnbounded, setAreaUpperUnbounded] = useState(false);
 
   // Period States
   const [startYear, setStartYear] = useState(new Date().getFullYear() - 1);
@@ -200,6 +204,8 @@ export default function App() {
     keyword: string;
     priceRange: [number, number];
     areaRange: [number, number];
+    priceUpperUnbounded: boolean;
+    areaUpperUnbounded: boolean;
     tableFiltersDraft: typeof tableFiltersDraft;
     tableFilters: typeof tableFilters;
   } | null>(null);
@@ -410,6 +416,8 @@ export default function App() {
     setKeyword('');
     setPriceRange([0, 500000]);
     setAreaRange([0, 200]);
+    setPriceUpperUnbounded(false);
+    setAreaUpperUnbounded(false);
     const initialFilters = createEmptyTableFilters();
     setTableFiltersDraft(initialFilters);
     setTableFilters(initialFilters);
@@ -429,8 +437,8 @@ export default function App() {
 
   const matchesFilters = useCallback((transaction: Transaction, omittedFacet?: FacetFilterKey) => {
     const matchKeyword = keyword ? transaction.apartmentName.includes(keyword) : true;
-    const matchPrice = transaction.price >= priceRange[0] && transaction.price <= priceRange[1];
-    const matchArea = transaction.area >= areaRange[0] && transaction.area <= areaRange[1];
+    const matchPrice = matchesNumericRange(transaction.price, priceRange, priceUpperUnbounded);
+    const matchArea = matchesNumericRange(transaction.area, areaRange, areaUpperUnbounded);
     const matchDate = isTransactionWithinDateRange(transaction, tableFilters.dateFrom, tableFilters.dateTo);
     const matchContract = tableFilters.contractLevel ? transaction.contractLevel === tableFilters.contractLevel : true;
     const matchRenew = tableFilters.useRequestRenew ? transaction.useRequestRenew === tableFilters.useRequestRenew : true;
@@ -450,7 +458,7 @@ export default function App() {
 
     return matchKeyword && matchPrice && matchArea && matchDate && matchContract && matchRenew && matchFloor && matchDong &&
       matchTablePriceMin && matchTablePriceMax && matchTableRentMin && matchTableRentMax && matchAreaCategory;
-  }, [keyword, priceRange, areaRange, tableFilters]);
+  }, [keyword, priceRange, areaRange, priceUpperUnbounded, areaUpperUnbounded, tableFilters]);
 
   const areaFilterOptions = useMemo(
     () => getAreaFilterOptions(allTransactions.filter((transaction) => matchesFilters(transaction, 'areaCategory'))),
@@ -505,11 +513,13 @@ export default function App() {
         keyword,
         priceRange: [priceRange[0], priceRange[1]],
         areaRange: [areaRange[0], areaRange[1]],
+        priceUpperUnbounded,
+        areaUpperUnbounded,
         tableFiltersDraft: { ...tableFiltersDraft },
         tableFilters: { ...tableFilters }
       });
     }
-  }, [filteredTransactions.length, keyword, keywordDraft, priceRange, areaRange, tableFilters, tableFiltersDraft]);
+  }, [filteredTransactions.length, keyword, keywordDraft, priceRange, areaRange, priceUpperUnbounded, areaUpperUnbounded, tableFilters, tableFiltersDraft]);
 
   const handleRestoreFilters = useCallback(() => {
     if (lastWorkingFilters) {
@@ -517,6 +527,8 @@ export default function App() {
       setKeyword(lastWorkingFilters.keyword);
       setPriceRange(lastWorkingFilters.priceRange);
       setAreaRange(lastWorkingFilters.areaRange);
+      setPriceUpperUnbounded(lastWorkingFilters.priceUpperUnbounded);
+      setAreaUpperUnbounded(lastWorkingFilters.areaUpperUnbounded);
       setTableFiltersDraft(lastWorkingFilters.tableFiltersDraft);
       setTableFilters(lastWorkingFilters.tableFilters);
     }
@@ -810,37 +822,87 @@ export default function App() {
       <Divider />
 
       <Box>
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 700 }}>
-          가격 범위 (만원)
-        </Typography>
+        <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+            가격 범위 (만원)
+          </Typography>
+          <FormControlLabel
+            control={(
+              <Checkbox
+                size="small"
+                checked={priceUpperUnbounded}
+                onChange={(event) => setPriceUpperUnbounded(event.target.checked)}
+                slotProps={{ input: { 'aria-label': '가격 상한 없음' } }}
+              />
+            )}
+            label={<Typography variant="caption">상한 없음(∞)</Typography>}
+            sx={{ m: 0, whiteSpace: 'nowrap' }}
+          />
+        </Box>
         <Slider
-          value={priceRange}
-          onChange={(_, val) => setPriceRange(val as [number, number])}
+          value={priceUpperUnbounded ? [priceRange[0], 500000] : priceRange}
+          onChange={(_, val, activeThumb) => {
+            const nextRange = val as [number, number];
+            if (priceUpperUnbounded) {
+              if (activeThumb === 0) {
+                setPriceRange([nextRange[0], Math.max(nextRange[0], priceRange[1])]);
+              }
+              return;
+            }
+            setPriceRange(nextRange);
+          }}
+          getAriaLabel={(index) => index === 0 ? '가격 하한' : '가격 상한'}
           valueLabelDisplay="auto"
           min={0}
           max={500000}
           step={1000}
+          disableSwap
         />
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Typography variant="caption">{priceRange[0].toLocaleString()}</Typography>
-          <Typography variant="caption">{priceRange[1].toLocaleString()}</Typography>
+          <Typography variant="caption">{priceUpperUnbounded ? '∞' : priceRange[1].toLocaleString()}</Typography>
         </Box>
       </Box>
 
       <Box>
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 700 }}>
-          전용면적 (㎡)
-        </Typography>
+        <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+            전용면적 (㎡)
+          </Typography>
+          <FormControlLabel
+            control={(
+              <Checkbox
+                size="small"
+                checked={areaUpperUnbounded}
+                onChange={(event) => setAreaUpperUnbounded(event.target.checked)}
+                slotProps={{ input: { 'aria-label': '전용면적 상한 없음' } }}
+              />
+            )}
+            label={<Typography variant="caption">상한 없음(∞)</Typography>}
+            sx={{ m: 0, whiteSpace: 'nowrap' }}
+          />
+        </Box>
         <Slider
-          value={areaRange}
-          onChange={(_, val) => setAreaRange(val as [number, number])}
+          value={areaUpperUnbounded ? [areaRange[0], 250] : areaRange}
+          onChange={(_, val, activeThumb) => {
+            const nextRange = val as [number, number];
+            if (areaUpperUnbounded) {
+              if (activeThumb === 0) {
+                setAreaRange([nextRange[0], Math.max(nextRange[0], areaRange[1])]);
+              }
+              return;
+            }
+            setAreaRange(nextRange);
+          }}
+          getAriaLabel={(index) => index === 0 ? '전용면적 하한' : '전용면적 상한'}
           valueLabelDisplay="auto"
           min={0}
           max={250}
+          disableSwap
         />
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Typography variant="caption">{areaRange[0]}</Typography>
-          <Typography variant="caption">{areaRange[1]}</Typography>
+          <Typography variant="caption">{areaUpperUnbounded ? '∞' : areaRange[1]}</Typography>
         </Box>
       </Box>
 

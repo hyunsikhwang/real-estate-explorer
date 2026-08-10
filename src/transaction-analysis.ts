@@ -47,6 +47,12 @@ export const isTransactionWithinDateRange = (
   return (!dateFrom || transactionDate >= dateFrom) && (!dateTo || transactionDate <= dateTo);
 };
 
+export const matchesNumericRange = (
+  value: number,
+  range: readonly [number, number],
+  upperUnbounded = false,
+) => value >= range[0] && (upperUnbounded || value <= range[1]);
+
 export const getAreaFilterValue = (transaction: Transaction) => String(transaction.area);
 
 export const getAreaFilterOptions = (transactions: Transaction[]): AreaFilterOption[] => {

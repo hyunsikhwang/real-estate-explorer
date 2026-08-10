@@ -9,6 +9,7 @@ import {
   getFloorFilterOptions,
   getTransactionDateKey,
   isTransactionWithinDateRange,
+  matchesNumericRange,
 } from '../src/transaction-analysis';
 import { Transaction, TradeType } from '../src/types';
 
@@ -76,6 +77,19 @@ test('거래일 범위 필터는 시작일과 종료일을 모두 포함한다',
   assert.equal(isTransactionWithinDateRange(row, '2026-08-07', '2026-08-07'), true);
   assert.equal(isTransactionWithinDateRange(row, '2026-08-08', ''), false);
   assert.equal(isTransactionWithinDateRange(row, '', '2026-08-06'), false);
+});
+
+test('숫자 범위 필터는 기본적으로 하한과 상한을 모두 적용한다', () => {
+  assert.equal(matchesNumericRange(100, [100, 200]), true);
+  assert.equal(matchesNumericRange(200, [100, 200]), true);
+  assert.equal(matchesNumericRange(99, [100, 200]), false);
+  assert.equal(matchesNumericRange(201, [100, 200]), false);
+});
+
+test('상한 없음 옵션은 하한을 유지하면서 숫자 상한을 제거한다', () => {
+  assert.equal(matchesNumericRange(99, [100, 200], true), false);
+  assert.equal(matchesNumericRange(200, [100, 200], true), true);
+  assert.equal(matchesNumericRange(1_000_000, [100, 200], true), true);
 });
 
 test('매매 극값은 필터 결과 전체에서 각 1건을 선택하고 동률이면 첫 거래를 유지한다', () => {
